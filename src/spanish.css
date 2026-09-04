@@ -60,9 +60,11 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(36, 86, 166,
 .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--olive); box-shadow: 0 0 0 4px rgba(100, 115, 90, .14); display: inline-block; }
 .sync-dot.saving, .sync-dot.checking, .sync-dot.conflict, .sync-dot.error { background: var(--gold); box-shadow: 0 0 0 4px rgba(227, 170, 53, .16); }
 .sync-dot.device { background: var(--ink-soft); box-shadow: 0 0 0 4px rgba(91, 105, 107, .13); }
-.device-banner { min-height: 38px; border-bottom: 1px solid #d4a63e; background: #fff1be; padding: 8px max(18px, calc((100vw - 1180px) / 2)); display: flex; align-items: baseline; gap: 12px; }
+.device-banner { min-height: 42px; border-bottom: 1px solid #d4a63e; background: #fff1be; padding: 8px max(18px, calc((100vw - 1180px) / 2)); display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.device-banner > div { display: flex; align-items: baseline; gap: 12px; }
 .device-banner strong { color: #7c540c; font-size: 9px; letter-spacing: .15em; text-transform: uppercase; }
 .device-banner span { color: #68604f; font-size: 10px; }
+.device-banner a { flex: 0 0 auto; color: #7c540c; font-size: 9px; font-weight: 800; text-underline-offset: 3px; }
 
 .main-content { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
 .view-enter { animation: rise-in .45s ease both; }
@@ -234,6 +236,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid rgba(36, 86, 166,
 .cloud-card small, .backup-card > small { color: var(--clay-dark); font-size: 7px; letter-spacing: .16em; }
 .cloud-card h3, .backup-card h3 { margin: 8px 0; font: 500 25px Georgia, serif; }
 .cloud-card p, .backup-card p { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.65; }
+.cloud-card a { display: inline-block; margin-top: 15px; color: var(--clay-dark); font-size: 10px; font-weight: 800; text-underline-offset: 3px; }
 .backup-card > div { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 21px; }
 .backup-card button { border: 1px solid var(--ink); background: transparent; padding: 9px 11px; font-size: 9px; cursor: pointer; }
 .backup-card button:hover { background: var(--ink); color: #fff; }
@@ -395,7 +398,8 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
   .site-header { height: 67px; padding: 0 15px; }
   .brand small, .header-status > span, .header-status .sync-dot { display: none; }
   .header-status b { border-left: 0; padding-right: 0; }
-  .device-banner { align-items: flex-start; padding: 9px 15px; flex-direction: column; gap: 2px; }
+  .device-banner { align-items: flex-start; padding: 9px 15px; gap: 10px; }
+  .device-banner > div { flex-direction: column; gap: 2px; }
   .device-banner span { line-height: 1.35; }
   .main-content { width: min(100% - 28px, 1180px); }
   .today-hero { min-height: 0; padding: 51px 4px 40px; display: block; }

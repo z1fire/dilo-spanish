@@ -60,6 +60,7 @@ const STORAGE_KEY = "dilo:spanish-a1:progress:v1";
 const STORAGE_TIME_KEY = "dilo:spanish-a1:saved-at:v1";
 const PREFERENCES_KEY = "dilo:spanish-a1:preferences:v1";
 const RECOVERY_KEY = "dilo:spanish-a1:recovery:v1";
+const SYNCED_APP_URL = "https://dilo-spanish-a1.z1ifre.chatgpt.site";
 
 function todayKey() {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
@@ -273,40 +274,50 @@ export default function SpanishApp() {
       setReady(true);
     });
 
-    void fetch("/api/progress", { cache: "no-store", headers: { accept: "application/json" } })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("device-only");
-        const result = await response.json() as { available?: boolean; user?: { displayName?: string; email?: string }; progress?: unknown; updatedAt?: number };
-        if (!result.available) throw new Error("device-only");
-        const remoteUpdatedAt = Number(result.updatedAt) || 0;
-        cloudUpdatedAtRef.current = remoteUpdatedAt;
-        syncEnabledRef.current = true;
-        setAccount({ mode: "signed-in", displayName: result.user?.displayName, email: result.user?.email });
-        if (result.progress) {
-          const remote = normalizeProgress(result.progress);
-          const localSavedAt = Number(window.localStorage.getItem(STORAGE_TIME_KEY)) || 0;
-          const localRaw = window.localStorage.getItem(STORAGE_KEY);
-          const local = localRaw ? normalizeProgress(JSON.parse(localRaw)) : starterProgress();
-          if (localSavedAt > remoteUpdatedAt && local.xp > 0 && JSON.stringify(local) !== JSON.stringify(remote)) {
-            setRemoteConflict({ progress: remote, updatedAt: remoteUpdatedAt });
-            setProgress(local);
-            setSyncStatus("conflict");
-            return;
+    const isSitesApp = window.location.hostname.endsWith(".chatgpt.site") || window.location.hostname === "localhost";
+    if (isSitesApp) {
+      void fetch("/api/progress", { cache: "no-store", headers: { accept: "application/json" } })
+        .then(async (response) => {
+          if (!response.ok) throw new Error("device-only");
+          const result = await response.json() as { available?: boolean; user?: { displayName?: string; email?: string }; progress?: unknown; updatedAt?: number };
+          if (!result.available) throw new Error("device-only");
+          const remoteUpdatedAt = Number(result.updatedAt) || 0;
+          cloudUpdatedAtRef.current = remoteUpdatedAt;
+          syncEnabledRef.current = true;
+          setAccount({ mode: "signed-in", displayName: result.user?.displayName, email: result.user?.email });
+          if (result.progress) {
+            const remote = normalizeProgress(result.progress);
+            const localSavedAt = Number(window.localStorage.getItem(STORAGE_TIME_KEY)) || 0;
+            const localRaw = window.localStorage.getItem(STORAGE_KEY);
+            const local = localRaw ? normalizeProgress(JSON.parse(localRaw)) : starterProgress();
+            if (localSavedAt > remoteUpdatedAt && local.xp > 0 && JSON.stringify(local) !== JSON.stringify(remote)) {
+              setRemoteConflict({ progress: remote, updatedAt: remoteUpdatedAt });
+              setProgress(local);
+              setSyncStatus("conflict");
+              return;
+            }
+            setProgress(remote);
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
+            window.localStorage.setItem(STORAGE_TIME_KEY, String(remoteUpdatedAt));
+            lastCloudPayloadRef.current = JSON.stringify(remote);
           }
-          setProgress(remote);
-          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
-          window.localStorage.setItem(STORAGE_TIME_KEY, String(remoteUpdatedAt));
-          lastCloudPayloadRef.current = JSON.stringify(remote);
-        }
-        setSyncStatus("synced");
-      })
-      .catch(() => {
+          setSyncStatus("synced");
+        })
+        .catch(() => {
+          setAccount({ mode: "device" });
+          setSyncStatus("device");
+        });
+    } else {
+      window.queueMicrotask(() => {
         setAccount({ mode: "device" });
         setSyncStatus("device");
       });
+    }
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => undefined);
+      const workerUrl = new URL("./sw.js", window.location.href);
+      const workerScope = new URL("./", window.location.href);
+      navigator.serviceWorker.register(workerUrl.pathname, { scope: workerScope.pathname }).catch(() => undefined);
     }
   }, []);
 
@@ -594,7 +605,7 @@ export default function SpanishApp() {
         </div>
       </header>
 
-      {account.mode === "device" && <div className="device-banner" role="status"><strong>Device copy</strong><span>Your progress is saved in this browser. The private published site adds account sync.</span></div>}
+      {account.mode === "device" && <div className="device-banner" role="status"><div><strong>Public device copy</strong><span>Your progress is saved in this browser. Export a backup before switching devices.</span></div><a href={SYNCED_APP_URL}>Open synced Dilo →</a></div>}
 
       <main className="main-content">
         {view === "today" && (
@@ -682,7 +693,7 @@ export default function SpanishApp() {
             <div className="stat-cards"><article><span>DÍAS</span><strong>{progress.streak}</strong><p>day rhythm</p></article><article><span>PUNTOS</span><strong>{progress.xp}</strong><p>practice XP</p></article><article><span>PALABRAS</span><strong>{progress.learnedWords.length}</strong><p>words covered</p></article><article><span>SEÑAL</span><strong>{accuracy || "—"}{accuracy ? "%" : ""}</strong><p>answer accuracy</p></article></div>
             <div className="coverage-panel"><div><span className="eyebrow">COURSE COVERAGE</span><h2>{coursePercent}% of the A1 path cleared.</h2><p>{progress.completedUnits.length} of {courseUnits.length} real-life routes</p></div><div className="coverage-bars"><div><span>Words introduced <b>{progress.learnedWords.length}/{curriculumTotals.words}</b></span><i><em style={{ width: `${Math.min(100, progress.learnedWords.length / curriculumTotals.words * 100)}%` }} /></i></div><div><span>Patterns introduced <b>{progress.learnedPatterns.length}/{curriculumTotals.patterns}</b></span><i><em style={{ width: `${Math.min(100, progress.learnedPatterns.length / curriculumTotals.patterns * 100)}%` }} /></i></div><div><span>Phrases practiced <b>{progress.practicedPhrases.length}/{curriculumTotals.phrases}</b></span><i><em style={{ width: `${Math.min(100, progress.practicedPhrases.length / curriculumTotals.phrases * 100)}%` }} /></i></div></div></div>
             <div className="progress-bottom">
-              <article className={`cloud-card ${syncStatus}`}><span className="sync-dot" /><div><small>{account.mode === "signed-in" ? "SIGNED-IN PROGRESS" : "DEVICE PROGRESS"}</small><h3>{syncStatus === "synced" ? "Your newest phrase follows you." : syncStatus === "conflict" ? "Two progress copies need a choice." : account.mode === "device" ? "Safe in this browser." : "Checking your saved copy…"}</h3><p>{account.mode === "signed-in" ? `${account.displayName ?? account.email ?? "Your account"} · your private Dilo record` : "Export a backup before clearing browser data or switching devices."}</p></div></article>
+              <article className={`cloud-card ${syncStatus}`}><span className="sync-dot" /><div><small>{account.mode === "signed-in" ? "SIGNED-IN PROGRESS" : "DEVICE PROGRESS"}</small><h3>{syncStatus === "synced" ? "Your newest phrase follows you." : syncStatus === "conflict" ? "Two progress copies need a choice." : account.mode === "device" ? "Safe in this browser." : "Checking your saved copy…"}</h3><p>{account.mode === "signed-in" ? `${account.displayName ?? account.email ?? "Your account"} · your private Dilo record` : "The public copy stays on this device. Export a backup or open the private app for account sync."}</p>{account.mode === "device" && <a href={`${SYNCED_APP_URL}/#progress`}>Open synced Dilo →</a>}</div></article>
               <article className="backup-card"><small>OWN YOUR COPY</small><h3>Backup & restore</h3><p>Dilo exports its own progress file and never touches your other language sites.</p><div><button onClick={exportProgress}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={() => setShowReset(true)}>Reset</button></div><input ref={importRef} type="file" accept="application/json" onChange={(event) => void importProgress(event)} hidden /></article>
             </div>
             {progress.checkpointScores.length > 0 && <div className="history-panel"><span className="eyebrow">CHECKPOINT HISTORY</span><div>{progress.checkpointScores.map((score, index) => <span key={`${score}-${index}`} className={score >= 70 ? "pass" : ""}><strong>{score}%</strong><small>Attempt {index + 1}</small></span>)}</div></div>}

@@ -41,3 +41,19 @@ test("keeps progress protected and starter assets removed", async () => {
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });
+
+test("builds a repository-path-safe GitHub Pages companion", async () => {
+  const [html, manifest, serviceWorker, appSource] = await Promise.all([
+    readFile(new URL("../docs/index.html", import.meta.url), "utf8"),
+    readFile(new URL("../docs/manifest.webmanifest", import.meta.url), "utf8"),
+    readFile(new URL("../docs/sw.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/SpanishApp.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(html, /\.\/assets\/index-/);
+  assert.match(html, /https:\/\/z1fire\.github\.io\/dilo-spanish\//);
+  assert.match(manifest, /"start_url": "\.\/#today"/);
+  assert.match(manifest, /"scope": "\.\/"/);
+  assert.match(serviceWorker, /dilo-pages-v2/);
+  assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
+  assert.match(appSource, /https:\/\/dilo-spanish-a1\.z1ifre\.chatgpt\.site/);
+});
