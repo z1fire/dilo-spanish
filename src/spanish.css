@@ -627,6 +627,10 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
 .recall-card { min-height: 370px; display: grid; align-content: center; text-align: center; }
 .recall-card > span, .tile-builder > span, .dictation > span, .reading-question > span { color: var(--clay-dark); font-size: 8px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .recall-card > h2 { margin: 12px 0 25px; font: 500 42px Georgia, serif; }
+.recall-card .reveal-recall { margin: 24px auto 0; }
+.feedback-box.reveal { border-color: var(--blue); background: #e5ecf8; }
+.self-grade { margin-top: 22px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.self-grade > button:not(.primary-action) { min-height: 46px; border: 1px solid var(--ink); background: transparent; padding: 11px 17px; cursor: pointer; font-size: 9px; font-weight: 800; }
 .recall-card label, .feedback-box label { display: grid; gap: 7px; text-align: left; margin-top: 20px; }
 .recall-card label span, .feedback-box label span { color: var(--ink-soft); font-size: 8px; letter-spacing: .12em; text-transform: uppercase; }
 .recall-card input, .dictation input, .feedback-box input { width: 100%; border: 0; border-bottom: 2px solid var(--ink); background: transparent; padding: 15px 5px; font: 500 22px Georgia, serif; }
@@ -663,6 +667,7 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
 .choice-list button.wrong { border-color: var(--clay); background: #f2d7ce; }
 .choice-list button.muted { opacity: .42; }
 .dictation { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 28px; display: grid; gap: 15px; text-align: left; }
+.masked-line { margin: 3px 0 12px; border: 1px dashed var(--line); background: var(--paper-light); padding: 22px; text-align: center; font: 500 clamp(20px, 4vw, 30px)/1.45 Georgia, serif; }
 .reading-card { padding: 0; overflow: hidden; }
 .reading-title { padding: 24px 27px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; }
 .reading-title span { color: var(--clay-dark); font-size: 7px; letter-spacing: .15em; text-transform: uppercase; }

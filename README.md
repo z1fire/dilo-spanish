@@ -7,9 +7,9 @@ Dilo is a speaking-first Spanish learning app that runs from CEFR A1 through C2.
 Every guided learning day follows the same complete loop:
 
 1. Cards introduce a small lexical set without scoring it.
-2. Recall requires typed retrieval from meaning or audio.
+2. Recall uses think, reveal, and honest self-grading from meaning or audio.
 3. Grammar teaches one form-meaning system and rebuilds an example.
-4. Listening checks meaning before full dictation.
+4. Listening checks meaning before a no-typing missing-phrase challenge.
 5. Build reconstructs the day’s mission line.
 6. Read places that line in a four-turn exchange.
 7. Speak requires all four lines, using browser speech recognition or an explicit manual fallback.

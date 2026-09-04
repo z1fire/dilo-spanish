@@ -63,14 +63,11 @@ function RecallStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
   const words = lexiconByLevel[progress.selectedLevel].filter((item) => plan.recallWordIds.includes(item.id));
   const [position, setPosition] = useState(0);
-  const [typed, setTyped] = useState("");
-  const [feedback, setFeedback] = useState<"question" | "correct" | "remediation">("question");
+  const [feedback, setFeedback] = useState<"question" | "revealed" | "correct" | "remediation">("question");
   const word = words[position];
   if (!word) return <div className="empty-step"><StepHeader step="recall" /><p>No recall items are due.</p><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>;
   const mode = position % 2 ? "audio" : "meaning";
-  const score = similarityScore(typed, word.spanish);
-  const submit = (giveUp = false) => {
-    const correct = !giveUp && score >= 86;
+  const submit = (correct: boolean) => {
     update((current) => {
       let next = recordSkill(current, "vocabulary", correct);
       next = scheduleReview(next, word.id, correct);
@@ -81,9 +78,9 @@ function RecallStep({ progress, update, done }: Props & { done: () => void }) {
   };
   const advance = () => {
     if (position >= words.length - 1) { done(); return; }
-    setPosition((value) => value + 1); setTyped(""); setFeedback("question");
+    setPosition((value) => value + 1); setFeedback("question");
   };
-  return <section className="coach-panel"><StepHeader step="recall" kicker={`${mode === "audio" ? "LISTENING" : "MEANING"} RECALL · ${position + 1}/${words.length}`} /><div className="recall-card">{mode === "audio" ? <><span>Listen without looking</span><button className="listen-orb" onClick={() => speakSpanish(word.spanish)} aria-label="Play Spanish prompt">◖))</button></> : <><span>Say this in Spanish</span><h2>{word.english}</h2></>} {feedback === "question" ? <><label><span>Your recall</span><input value={typed} onChange={(event) => setTyped(event.target.value)} onKeyDown={(event) => event.key === "Enter" && typed.trim() && submit()} placeholder="Type what you remember" /></label><div className="recall-actions"><button onClick={() => submit(true)}>I don’t recall</button><button className="primary-action" disabled={!typed.trim()} onClick={() => submit()}>Check <span>→</span></button></div></> : <div className={`feedback-box ${feedback}`}><span>{feedback === "correct" ? "RETRIEVED" : "MAKE THE CORRECTION"}</span><h2>{word.spanish}</h2><p>{word.english} · {word.cue}</p><SoundButton text={word.spanish} />{feedback === "remediation" && <label><span>Type the full answer once</span><input value={typed} onChange={(event) => setTyped(event.target.value)} /></label>}<button className="primary-action" disabled={feedback === "remediation" && similarityScore(typed, word.spanish) < 86} onClick={advance}>Continue <span>→</span></button></div>}</div></section>;
+  return <section className="coach-panel"><StepHeader step="recall" kicker={`${mode === "audio" ? "LISTENING" : "MEANING"} RECALL · ${position + 1}/${words.length}`} /><div className="recall-card">{mode === "audio" ? <><span>Listen without looking</span><button className="listen-orb" onClick={() => speakSpanish(word.spanish)} aria-label="Play Spanish prompt">◖))</button></> : <><span>Say this in Spanish before revealing</span><h2>{word.english}</h2></>}{feedback === "question" && <button className="primary-action reveal-recall" onClick={() => setFeedback("revealed")}>Reveal answer <span>→</span></button>}{feedback === "revealed" && <div className="feedback-box reveal"><span>COMPARE WITH YOUR RECALL</span><h2>{word.spanish}</h2><p>{word.english} · {word.cue}</p><SoundButton text={word.spanish} /><div className="self-grade"><button onClick={() => submit(false)}>Not yet</button><button className="primary-action" onClick={() => submit(true)}>I recalled it <span>✓</span></button></div></div>}{(feedback === "correct" || feedback === "remediation") && <div className={`feedback-box ${feedback}`}><span>{feedback === "correct" ? "RETRIEVED" : "ADDED TO CORRECTIONS"}</span><h2>{word.spanish}</h2><p>{feedback === "correct" ? "The next review is scheduled automatically." : "Listen and say the complete answer aloud once before continuing."}</p><SoundButton text={word.spanish} /><button className="primary-action" onClick={advance}>Continue <span>→</span></button></div>}</div></section>;
 }
 
 function GrammarStep({ progress, update, done }: Props & { done: () => void }) {
@@ -118,11 +115,17 @@ function ListenStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
   const mission = missionsByLevel[progress.selectedLevel][plan.missionIndex];
   const pool = missionsByLevel[progress.selectedLevel];
-  const [phase, setPhase] = useState<"meaning" | "dictation" | "done">("meaning");
+  const [phase, setPhase] = useState<"meaning" | "gap" | "done">("meaning");
   const [meaning, setMeaning] = useState("");
-  const [typed, setTyped] = useState("");
+  const [gapAnswer, setGapAnswer] = useState("");
   const [message, setMessage] = useState("");
   const meaningChoices = choices(mission.translation, pool.map((item) => item.translation), plan.learningDay + 31);
+  const modelTokens = sentenceTokens(mission.model);
+  const gapLength = Math.min(3, Math.max(1, Math.floor(modelTokens.length / 3)));
+  const answerSegment = modelTokens.slice(-gapLength).join(" ");
+  const maskedLine = `${modelTokens.slice(0, -gapLength).join(" ")} _____`;
+  const segmentPool = pool.map((item) => sentenceTokens(item.model).slice(-gapLength).join(" "));
+  const gapChoices = choices(answerSegment, segmentPool, plan.learningDay + 87);
   const chooseMeaning = (option: string) => {
     const correct = option === mission.translation;
     setMeaning(option);
@@ -132,18 +135,19 @@ function ListenStep({ progress, update, done }: Props & { done: () => void }) {
       return next;
     });
   };
-  const toDictation = () => { setPhase("dictation"); setMessage(""); };
-  const checkDictation = () => {
-    const correct = similarityScore(typed, mission.model) >= 86;
-    setMessage(correct ? "The sounds and spelling line up." : `Compare: ${mission.model}`);
+  const toGap = () => { setPhase("gap"); setMessage(""); };
+  const checkGap = (option: string) => {
+    const correct = option === answerSegment;
+    setGapAnswer(option);
+    setMessage(correct ? "The sounds and sentence ending line up." : `Complete line: ${mission.model}`);
     update((current) => {
       let next = recordSkill(current, "listening", correct);
-      if (!correct) next = queueCorrection(next, { id: `dictation:${mission.id}`, skill: "listening", prompt: mission.translation, answer: mission.model, choices: choices(mission.model, pool.map((item) => item.model), plan.learningDay + 87), explanation: "Listen for word boundaries, endings, and written accents.", speech: mission.model });
+      if (!correct) next = queueCorrection(next, { id: `gap:${mission.id}`, skill: "listening", prompt: maskedLine, answer: answerSegment, choices: gapChoices, explanation: `Complete line: ${mission.model}`, speech: mission.model });
       return next;
     });
     setPhase("done");
   };
-  return <section className="coach-panel"><StepHeader step="listen" kicker={`${mission.domain.toUpperCase()} · ${mission.title}`} /><div className="listening-stage"><p>{mission.situation}</p><div className="listen-controls"><button className="listen-orb" onClick={() => speakSpanish(mission.model)} aria-label="Play normal audio">◖))</button><button onClick={() => speakSpanish(mission.model, .62)}>Slow replay</button></div>{phase === "meaning" && <><h2>What does the speaker mean?</h2><div className="choice-list">{meaningChoices.map((option) => <button key={option} disabled={Boolean(meaning)} className={meaning ? option === mission.translation ? "correct" : option === meaning ? "wrong" : "muted" : ""} onClick={() => chooseMeaning(option)}>{option}</button>)}</div>{meaning && <button className="primary-action coach-next" onClick={toDictation}>Continue to dictation <span>→</span></button>}</>}{phase !== "meaning" && <div className="dictation"><span>Write the complete Spanish line</span><input value={typed} disabled={phase === "done"} onChange={(event) => setTyped(event.target.value)} placeholder="Listen again, then type" />{phase === "dictation" ? <button className="primary-action" disabled={!typed.trim()} onClick={checkDictation}>Check dictation <span>→</span></button> : <div className="feedback-box"><strong>{message}</strong><p>{mission.model}</p><small>{mission.translation}</small><SoundButton text={mission.model} /><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>}</div>}</div></section>;
+  return <section className="coach-panel"><StepHeader step="listen" kicker={`${mission.domain.toUpperCase()} · ${mission.title}`} /><div className="listening-stage"><p>{mission.situation}</p><div className="listen-controls"><button className="listen-orb" onClick={() => speakSpanish(mission.model)} aria-label="Play normal audio">◖))</button><button onClick={() => speakSpanish(mission.model, .62)}>Slow replay</button></div>{phase === "meaning" && <><h2>What does the speaker mean?</h2><div className="choice-list">{meaningChoices.map((option) => <button key={option} disabled={Boolean(meaning)} className={meaning ? option === mission.translation ? "correct" : option === meaning ? "wrong" : "muted" : ""} onClick={() => chooseMeaning(option)}>{option}</button>)}</div>{meaning && <button className="primary-action coach-next" onClick={toGap}>Continue to missing phrase <span>→</span></button>}</>}{phase !== "meaning" && <div className="dictation"><span>Choose the missing Spanish words</span><h3 className="masked-line">{maskedLine}</h3><div className="choice-list">{gapChoices.map((option) => <button key={option} disabled={Boolean(gapAnswer)} className={gapAnswer ? option === answerSegment ? "correct" : option === gapAnswer ? "wrong" : "muted" : ""} onClick={() => checkGap(option)}>{option}</button>)}</div>{phase === "done" && <div className="feedback-box"><strong>{message}</strong><p>{mission.model}</p><small>{mission.translation}</small><SoundButton text={mission.model} /><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>}</div>}</div></section>;
 }
 
 function BuildStep({ progress, update, done }: Props & { done: () => void }) {

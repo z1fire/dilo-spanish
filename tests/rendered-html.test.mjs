@@ -91,6 +91,10 @@ test("ships the complete A1–C2 learning engine", async () => {
   assert.match(engine, /Correction queue clear/);
   assert.match(coach, /FOUR-LINE MISSION/);
   assert.match(coach, /Speech recognition checks approximate word similarity, not accent/);
+  assert.doesNotMatch(coach, /<input\b/);
+  assert.doesNotMatch(coach, /Type what you remember|Write the complete Spanish line/);
+  assert.match(coach, /Reveal answer/);
+  assert.match(coach, /Choose the missing Spanish words/);
   assert.match(labs, /Twenty listening items and twenty reading\/usage items/);
   assert.match(appSource, /A1 → C2/);
   assert.match(appSource, /B2 IS THE CONVERSATIONAL FLUENCY THRESHOLD/);
