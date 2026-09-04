@@ -1,0 +1,13 @@
+{
+  "name": "Dilo — Spanish you can use today",
+  "short_name": "Dilo",
+  "description": "A speaking-first A1 Spanish course.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5ebdd",
+  "theme_color": "#142a33",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
