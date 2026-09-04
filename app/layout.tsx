@@ -7,8 +7,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "Dilo — Spanish you can use today";
-  const description = "A warm, speaking-first A1 Spanish course with real-life routes, listening practice, a phrasebook, and saved progress.";
+  const title = "Dilo — Spanish from first words to fluency";
+  const description = "A complete CEFR A1–C2 Spanish learning path with spaced recall, grammar, listening, reading, speaking missions, corrections, and saved progress.";
 
   return {
     title,
@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
       description,
       type: "website",
       url: origin,
-      images: [{ url: `${origin}/og.png`, width: 1536, height: 1024, alt: "Dilo — Spanish you can use today" }],
+      images: [{ url: `${origin}/og.png`, width: 1536, height: 1024, alt: "Dilo — Spanish from first words to fluency" }],
     },
     twitter: { card: "summary_large_image", title, description, images: [`${origin}/og.png`] },
     appleWebApp: { capable: true, title: "Dilo", statusBarStyle: "black-translucent" },

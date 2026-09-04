@@ -19,7 +19,7 @@ test("server-renders the finished Dilo course", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /<title>Dilo — Spanish you can use today<\/title>/i);
+  assert.match(html, /<title>Dilo — Spanish from first words to fluency<\/title>/i);
   assert.match(html, /Preparando tu camino/);
   assert.doesNotMatch(html, /codex-preview|SkeletonPreview|react-loading-skeleton/);
 });
@@ -33,7 +33,7 @@ test("keeps progress protected and starter assets removed", async () => {
     readFile(new URL("../app/api/progress/route.ts", import.meta.url), "utf8"),
   ]);
   assert.match(page, /SpanishApp/);
-  assert.match(layout, /Dilo — Spanish you can use today/);
+  assert.match(layout, /Dilo — Spanish from first words to fluency/);
   assert.match(appSource, /Speak sooner\./);
   assert.match(appSource, /Spanish that leaves/);
   assert.match(progressRoute, /getChatGPTUser/);
@@ -53,7 +53,45 @@ test("builds a repository-path-safe GitHub Pages companion", async () => {
   assert.match(html, /https:\/\/z1fire\.github\.io\/dilo-spanish\//);
   assert.match(manifest, /"start_url": "\.\/#today"/);
   assert.match(manifest, /"scope": "\.\/"/);
-  assert.match(serviceWorker, /dilo-pages-v2/);
+  assert.match(serviceWorker, /dilo-pages-v3/);
   assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(appSource, /https:\/\/dilo-spanish-a1\.z1ifre\.chatgpt\.site/);
+});
+
+test("ships the complete A1–C2 learning engine", async () => {
+  const [curriculum, engine, coach, labs, appSource] = await Promise.all([
+    readFile(new URL("../src/spanish-curriculum.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/spanish-engine.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/DailyCoach.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/PracticeLabs.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/SpanishApp.tsx", import.meta.url), "utf8"),
+  ]);
+
+  const tick = String.fromCharCode(96);
+  const rowsFor = (sourceName, level) => {
+    const start = curriculum.indexOf(`const ${sourceName}`);
+    const end = curriculum.indexOf("\n};", start);
+    const block = curriculum.slice(start, end);
+    const marker = `${level}: ${tick}`;
+    const rowStart = block.indexOf(marker) + marker.length;
+    const rowEnd = block.indexOf(tick, rowStart);
+    return block.slice(rowStart, rowEnd).trim().split(/\r?\n/);
+  };
+
+  for (const level of ["A1", "A2", "B1", "B2", "C1", "C2"]) {
+    assert.equal(rowsFor("lexiconSource", level).length, 36, `${level} lexical core`);
+    assert.equal(rowsFor("grammarSource", level).length, 12, `${level} grammar core`);
+    assert.equal(rowsFor("missionSource", level).length, 12, `${level} mission core`);
+    assert.ok(rowsFor("missionSource", level).every((row) => row.split("|").length === 9), `${level} missions are complete`);
+  }
+
+  assert.match(curriculum, /\["A1", "A2", "B1", "B2", "C1", "C2"\]/);
+  assert.match(engine, /DAILY_STEPS = \["cards", "recall", "grammar", "listen", "build", "read", "speak"\]/);
+  assert.match(engine, /version: 2/);
+  assert.match(engine, /Correction queue clear/);
+  assert.match(coach, /FOUR-LINE MISSION/);
+  assert.match(coach, /Speech recognition checks approximate word similarity, not accent/);
+  assert.match(labs, /Twenty listening items and twenty reading\/usage items/);
+  assert.match(appSource, /A1 → C2/);
+  assert.match(appSource, /B2 IS THE CONVERSATIONAL FLUENCY THRESHOLD/);
 });

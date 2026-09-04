@@ -1,324 +1,144 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import DailyCoach from "./DailyCoach";
+import { Checkpoint, DrillSession, type DrillKind } from "./PracticeLabs";
 import {
-  checkpointQuestions,
-  courseUnits,
+  dueCorrections,
+  ensureCurrentPlan,
+  getArchive,
+  graduateLevel,
+  graduationStatus,
+  localDate,
+  normalizeProgress,
+  recordSkill,
+  recordTrainingSeconds,
+  resolveCorrection,
+  skillAccuracy,
+  startBonusPlan,
+  switchLevel,
+  type Progress,
+  type SkillArea,
+} from "./spanish-engine";
+import {
+  allGrammar,
+  allLexicon,
+  allMissions,
   curriculumTotals,
-  patterns,
-  phrases,
-  situationPrompts,
-  vocabulary,
-  type CourseUnit,
-  type Pattern,
-  type Word,
-} from "./spanish-data";
+  grammarByLevel,
+  levelOrder,
+  levels,
+  levelSoundLessons,
+  lexiconByLevel,
+  missionsByLevel,
+  soundLessons,
+} from "./spanish-curriculum";
+import { formatDuration, percent, speakSpanish } from "./spanish-ui";
 import "./spanish.css";
 
-type View = "today" | "path" | "practice" | "phrasebook" | "progress";
-type LibraryTab = "phrases" | "words" | "patterns";
+type View = "today" | "course" | "practice" | "library" | "checkpoint" | "progress";
+type LibraryTab = "words" | "grammar" | "missions" | "sounds";
 type SyncStatus = "checking" | "saving" | "synced" | "device" | "error" | "conflict";
 type Account = { mode: "checking" | "signed-in" | "device"; displayName?: string; email?: string };
-type Question = {
-  prompt: string;
-  note: string;
-  options: readonly string[];
-  answer: string;
-  speech?: string;
-  skill: "Words" | "Meaning" | "Patterns" | "Listening" | "Situations";
-  sourceId: string;
-  explanation?: string;
-  listening?: boolean;
-};
-type Session = {
-  title: string;
-  eyebrow: string;
-  questions: Question[];
-  kind: "unit" | "drill" | "checkpoint";
-  unit?: number;
-};
+type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
-type Progress = {
-  version: 1;
-  onboarded: boolean;
-  dailyGoal: number;
-  goal: string;
-  xp: number;
-  streak: number;
-  lastStudyDate: string;
-  activeDays: string[];
-  completedUnits: number[];
-  learnedWords: string[];
-  learnedPatterns: string[];
-  practicedPhrases: string[];
-  reviewCount: number;
-  correctCount: number;
-  checkpointScores: number[];
-};
-
-const STORAGE_KEY = "dilo:spanish-a1:progress:v1";
-const STORAGE_TIME_KEY = "dilo:spanish-a1:saved-at:v1";
-const PREFERENCES_KEY = "dilo:spanish-a1:preferences:v1";
-const RECOVERY_KEY = "dilo:spanish-a1:recovery:v1";
+const STORAGE_KEY = "dilo:spanish:progress:v2";
+const LEGACY_STORAGE_KEY = "dilo:spanish-a1:progress:v1";
+const STORAGE_TIME_KEY = "dilo:spanish:saved-at:v2";
+const PREFERENCES_KEY = "dilo:spanish:preferences:v2";
+const RECOVERY_KEY = "dilo:spanish:recovery:v2";
 const SYNCED_APP_URL = "https://dilo-spanish-a1.z1ifre.chatgpt.site";
+const APP_VERSION = "2.0.0";
 
-function todayKey() {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
-}
-
-function starterProgress(): Progress {
-  return {
-    version: 1,
-    onboarded: false,
-    dailyGoal: 10,
-    goal: "Speak with confidence",
-    xp: 0,
-    streak: 0,
-    lastStudyDate: "",
-    activeDays: [],
-    completedUnits: [],
-    learnedWords: [],
-    learnedPatterns: [],
-    practicedPhrases: [],
-    reviewCount: 0,
-    correctCount: 0,
-    checkpointScores: [],
+function CorrectionLab({ progress, update, close }: { progress: Progress; update: (recipe: (current: Progress) => Progress) => void; close: () => void }) {
+  const [answer, setAnswer] = useState("");
+  const [item, setItem] = useState(() => dueCorrections(progress)[0] ?? null);
+  if (!item) return <main className="session-shell result-stage"><span>CORRECTIONS CLEAR</span><strong>✓</strong><h1>Nothing due right now.</h1><p>A correction returns on the next learning day after its first successful retrieval.</p><button className="primary-action" onClick={close}>Back to practice <span>→</span></button></main>;
+  const choose = (option: string) => {
+    const correct = option === item.answer;
+    setAnswer(option);
+    update((current) => resolveCorrection(recordSkill(current, item.skill, correct), item.id, correct));
   };
-}
-
-function normalizeProgress(value: unknown): Progress {
-  const base = starterProgress();
-  if (!value || typeof value !== "object") return base;
-  const raw = value as Partial<Progress>;
-  const strings = (item: unknown) => Array.isArray(item) ? item.filter((entry): entry is string => typeof entry === "string") : [];
-  const numbers = (item: unknown) => Array.isArray(item) ? item.filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry)) : [];
-  return {
-    ...base,
-    ...raw,
-    version: 1,
-    onboarded: Boolean(raw.onboarded),
-    dailyGoal: [5, 10, 15].includes(Number(raw.dailyGoal)) ? Number(raw.dailyGoal) : 10,
-    goal: typeof raw.goal === "string" ? raw.goal : base.goal,
-    xp: Math.max(0, Number(raw.xp) || 0),
-    streak: Math.max(0, Number(raw.streak) || 0),
-    lastStudyDate: typeof raw.lastStudyDate === "string" ? raw.lastStudyDate : "",
-    activeDays: strings(raw.activeDays).slice(-366),
-    completedUnits: numbers(raw.completedUnits),
-    learnedWords: strings(raw.learnedWords),
-    learnedPatterns: strings(raw.learnedPatterns),
-    practicedPhrases: strings(raw.practicedPhrases),
-    reviewCount: Math.max(0, Number(raw.reviewCount) || 0),
-    correctCount: Math.max(0, Number(raw.correctCount) || 0),
-    checkpointScores: numbers(raw.checkpointScores).slice(-20),
-  };
-}
-
-function unique<T>(items: T[]) {
-  return Array.from(new Set(items));
-}
-
-function shuffled<T>(items: readonly T[], seed = Date.now()) {
-  const next = [...items];
-  let state = seed % 2147483647 || 1;
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    state = state * 16807 % 2147483647;
-    const target = state % (index + 1);
-    [next[index], next[target]] = [next[target], next[index]];
-  }
-  return next;
-}
-
-function pickOptions(answer: string, pool: string[], seed: number) {
-  const choices = shuffled(unique(pool.filter((item) => item !== answer)), seed).slice(0, 3);
-  return shuffled([...choices, answer], seed + 97);
-}
-
-function speakSpanish(text: string, rate = 0.82) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-  window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = "es-ES";
-  utterance.rate = rate;
-  const voices = window.speechSynthesis.getVoices();
-  const voice = voices.find((item) => item.lang.toLowerCase() === "es-es")
-    ?? voices.find((item) => item.lang.toLowerCase().startsWith("es"));
-  if (voice) utterance.voice = voice;
-  window.speechSynthesis.speak(utterance);
-}
-
-function updateStudyDay(progress: Progress) {
-  const today = todayKey();
-  if (progress.lastStudyDate === today) return progress;
-  const previous = new Date(`${progress.lastStudyDate || "1970-01-01"}T12:00:00`);
-  const current = new Date(`${today}T12:00:00`);
-  const gap = Math.round((current.getTime() - previous.getTime()) / 86400000);
-  return {
-    ...progress,
-    lastStudyDate: today,
-    streak: gap === 1 ? progress.streak + 1 : 1,
-    activeDays: unique([...progress.activeDays, today]).slice(-366),
-  };
-}
-
-function wordQuestion(item: Word, index: number): Question {
-  return {
-    prompt: item.meaning,
-    note: "Choose the Spanish word",
-    options: pickOptions(item.word, vocabulary.map((entry) => entry.word), item.word.length * 43 + index),
-    answer: item.word,
-    speech: item.word.replace("/a", "a"),
-    skill: "Words",
-    sourceId: `word:${item.word}`,
-    explanation: item.note,
-  };
-}
-
-function patternQuestion(item: Pattern, index: number): Question {
-  return {
-    prompt: item.meaning,
-    note: "Choose the useful pattern",
-    options: pickOptions(item.pattern, patterns.map((entry) => entry.pattern), item.pattern.length * 31 + index),
-    answer: item.pattern,
-    speech: item.example,
-    skill: "Patterns",
-    sourceId: `pattern:${item.pattern}`,
-    explanation: `${item.example} — ${item.translation}`,
-  };
-}
-
-function unitQuestions(unit: CourseUnit): Question[] {
-  const words = shuffled(unit.words).slice(0, 6).map(wordQuestion);
-  const meanings = shuffled(unit.dialogue).slice(0, 2).map((line, index) => ({
-    prompt: line.line,
-    note: "What does this mean?",
-    options: pickOptions(line.translation, phrases.map((entry) => entry.translation), line.line.length * 19 + index),
-    answer: line.translation,
-    speech: line.line,
-    skill: "Meaning" as const,
-    sourceId: `phrase:${unit.id}:${unit.dialogue.indexOf(line)}`,
-  }));
-  const grammar = unit.patterns.map(patternQuestion);
-  return shuffled([...words, ...meanings, ...grammar]).slice(0, 10);
-}
-
-function listeningQuestions(): Question[] {
-  return shuffled(phrases).slice(0, 10).map((item, index) => ({
-    prompt: "Escucha",
-    note: "Tap the speaker, then choose what you heard",
-    options: pickOptions(item.spanish, phrases.map((entry) => entry.spanish), item.spanish.length * 23 + index),
-    answer: item.spanish,
-    speech: item.spanish,
-    skill: "Listening",
-    sourceId: `phrase:${item.id}`,
-    explanation: item.translation,
-    listening: true,
-  }));
-}
-
-function situationQuestions(): Question[] {
-  return shuffled(situationPrompts).map((item, index) => ({
-    prompt: item.scenario,
-    note: "What would you say?",
-    options: shuffled(item.options, index + 101),
-    answer: item.answer,
-    speech: item.answer,
-    skill: "Situations",
-    sourceId: `situation:${index}`,
-  }));
+  return <main className="session-shell correction-session"><header className="session-topbar"><button onClick={close}>×</button><div><span>CORRECTION LOOP</span><strong>{dueCorrections(progress).length + (answer ? 1 : 0)} in this pass</strong></div><small>{item.correctStreak ? "2nd retrieval" : "1st retrieval"}</small></header><section className="quiz-stage"><div className="quiz-prompt"><span>{item.skill}</span><h1>{item.prompt}</h1>{item.speech && <button className="sound-button" onClick={() => speakSpanish(item.speech!)}><b>◖))</b><small>Hear it</small></button>}</div><div className="answer-grid">{item.choices.map((option, index) => <button key={option} disabled={Boolean(answer)} className={answer ? option === item.answer ? "correct" : option === answer ? "wrong" : "muted" : ""} onClick={() => choose(option)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div>{answer && <div className={`answer-ribbon ${answer === item.answer ? "" : "wrong"}`}><div><strong>{answer === item.answer ? (item.correctStreak ? "Correction cleared." : "Correct once. It returns next day.") : `Answer: ${item.answer}`}</strong><span>{item.explanation}</span></div><button onClick={() => { setItem(dueCorrections(progress)[0] ?? null); setAnswer(""); }}>Next →</button></div>}</section></main>;
 }
 
 export default function SpanishApp() {
   const [view, setView] = useState<View>("today");
-  const [activeUnit, setActiveUnit] = useState<CourseUnit | null>(null);
-  const [progress, setProgress] = useState<Progress>(starterProgress);
+  const [progress, setProgress] = useState<Progress>(() => ensureCurrentPlan(normalizeProgress(null)));
   const [ready, setReady] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
+  const [drill, setDrill] = useState<DrillKind | null>(null);
+  const [correctionsOpen, setCorrectionsOpen] = useState(false);
+  const [examOpen, setExamOpen] = useState(false);
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>("words");
+  const [search, setSearch] = useState("");
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("checking");
   const [account, setAccount] = useState<Account>({ mode: "checking" });
   const [remoteConflict, setRemoteConflict] = useState<{ progress: Progress; updatedAt: number } | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [questionIndex, setQuestionIndex] = useState(0);
-  const [answer, setAnswer] = useState<string | null>(null);
-  const [sessionCorrect, setSessionCorrect] = useState(0);
-  const [sessionFinished, setSessionFinished] = useState(false);
-  const [libraryTab, setLibraryTab] = useState<LibraryTab>("phrases");
-  const [search, setSearch] = useState("");
-  const [goal, setGoal] = useState("Speak with confidence");
-  const [dailyGoal, setDailyGoal] = useState(10);
   const [showReset, setShowReset] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState("");
+  const [goal, setGoal] = useState("Speak with confidence");
+  const [dailyMinutes, setDailyMinutes] = useState(20);
+  const [dailyNew, setDailyNew] = useState(6);
+  const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const cloudUpdatedAtRef = useRef(0);
   const syncEnabledRef = useRef(false);
   const lastCloudPayloadRef = useRef("");
+  const lastInteractionRef = useRef(0);
+
+  const update = useCallback((recipe: (current: Progress) => Progress) => setProgress((current) => recipe(current)), []);
 
   useEffect(() => {
-    const route = window.location.hash.replace("#", "") as View;
-    let deviceProgress: Progress | null = null;
-    let deviceTab: LibraryTab | null = null;
+    let device: Progress | null = null;
     try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored) deviceProgress = normalizeProgress(JSON.parse(stored));
+      const stored = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (stored) device = normalizeProgress(JSON.parse(stored));
       const prefs = window.localStorage.getItem(PREFERENCES_KEY);
       if (prefs) {
         const parsed = JSON.parse(prefs) as { libraryTab?: LibraryTab };
-        if (parsed.libraryTab) deviceTab = parsed.libraryTab;
+        if (parsed.libraryTab) window.queueMicrotask(() => setLibraryTab(parsed.libraryTab!));
       }
-    } catch {
-      // A damaged browser copy should not stop the course from opening.
-    }
-
+    } catch { /* A damaged browser copy must never prevent Dilo from opening. */ }
+    const route = window.location.hash.replace("#", "") as View;
     window.queueMicrotask(() => {
-      if (["today", "path", "practice", "phrasebook", "progress"].includes(route)) setView(route);
-      if (deviceProgress) setProgress(deviceProgress);
-      if (deviceTab) setLibraryTab(deviceTab);
+      if (["today", "course", "practice", "library", "checkpoint", "progress"].includes(route)) setView(route);
+      if (device) setProgress(device);
       setReady(true);
+      lastInteractionRef.current = Date.now();
     });
 
-    const isSitesApp = window.location.hostname.endsWith(".chatgpt.site") || window.location.hostname === "localhost";
-    if (isSitesApp) {
-      void fetch("/api/progress", { cache: "no-store", headers: { accept: "application/json" } })
-        .then(async (response) => {
-          if (!response.ok) throw new Error("device-only");
-          const result = await response.json() as { available?: boolean; user?: { displayName?: string; email?: string }; progress?: unknown; updatedAt?: number };
-          if (!result.available) throw new Error("device-only");
-          const remoteUpdatedAt = Number(result.updatedAt) || 0;
-          cloudUpdatedAtRef.current = remoteUpdatedAt;
-          syncEnabledRef.current = true;
-          setAccount({ mode: "signed-in", displayName: result.user?.displayName, email: result.user?.email });
-          if (result.progress) {
-            const remote = normalizeProgress(result.progress);
-            const localSavedAt = Number(window.localStorage.getItem(STORAGE_TIME_KEY)) || 0;
-            const localRaw = window.localStorage.getItem(STORAGE_KEY);
-            const local = localRaw ? normalizeProgress(JSON.parse(localRaw)) : starterProgress();
-            if (localSavedAt > remoteUpdatedAt && local.xp > 0 && JSON.stringify(local) !== JSON.stringify(remote)) {
-              setRemoteConflict({ progress: remote, updatedAt: remoteUpdatedAt });
-              setProgress(local);
-              setSyncStatus("conflict");
-              return;
-            }
-            setProgress(remote);
-            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remote));
-            window.localStorage.setItem(STORAGE_TIME_KEY, String(remoteUpdatedAt));
-            lastCloudPayloadRef.current = JSON.stringify(remote);
+    const sitesHost = window.location.hostname.endsWith(".chatgpt.site") || window.location.hostname === "localhost";
+    if (sitesHost) {
+      void fetch("/api/progress", { cache: "no-store", headers: { accept: "application/json" } }).then(async (response) => {
+        if (!response.ok) throw new Error("device-only");
+        const result = await response.json() as { available?: boolean; user?: { displayName?: string; email?: string }; progress?: unknown; updatedAt?: number };
+        if (!result.available) throw new Error("device-only");
+        const remoteUpdatedAt = Number(result.updatedAt) || 0;
+        cloudUpdatedAtRef.current = remoteUpdatedAt;
+        syncEnabledRef.current = true;
+        setAccount({ mode: "signed-in", displayName: result.user?.displayName, email: result.user?.email });
+        if (result.progress) {
+          const remote = normalizeProgress(result.progress);
+          const localSavedAt = Number(window.localStorage.getItem(STORAGE_TIME_KEY)) || 0;
+          const localRaw = window.localStorage.getItem(STORAGE_KEY) ?? window.localStorage.getItem(LEGACY_STORAGE_KEY);
+          const local = localRaw ? normalizeProgress(JSON.parse(localRaw)) : normalizeProgress(null);
+          if (localSavedAt > remoteUpdatedAt && local.xp > 0 && JSON.stringify(local) !== JSON.stringify(remote)) {
+            setRemoteConflict({ progress: remote, updatedAt: remoteUpdatedAt }); setProgress(local); setSyncStatus("conflict"); return;
           }
-          setSyncStatus("synced");
-        })
-        .catch(() => {
-          setAccount({ mode: "device" });
-          setSyncStatus("device");
-        });
-    } else {
-      window.queueMicrotask(() => {
-        setAccount({ mode: "device" });
-        setSyncStatus("device");
-      });
-    }
-
+          setProgress(remote); window.localStorage.setItem(STORAGE_KEY, JSON.stringify(remote)); window.localStorage.setItem(STORAGE_TIME_KEY, String(remoteUpdatedAt)); lastCloudPayloadRef.current = JSON.stringify(remote);
+        }
+        setSyncStatus("synced");
+      }).catch(() => { setAccount({ mode: "device" }); setSyncStatus("device"); });
+    } else { window.queueMicrotask(() => { setAccount({ mode: "device" }); setSyncStatus("device"); }); }
     if ("serviceWorker" in navigator) {
       const workerUrl = new URL("./sw.js", window.location.href);
       const workerScope = new URL("./", window.location.href);
       navigator.serviceWorker.register(workerUrl.pathname, { scope: workerScope.pathname }).catch(() => undefined);
     }
+    const captureInstall = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPrompt); };
+    window.addEventListener("beforeinstallprompt", captureInstall);
+    return () => window.removeEventListener("beforeinstallprompt", captureInstall);
   }, []);
 
   useEffect(() => {
@@ -334,26 +154,25 @@ export default function SpanishApp() {
     if (payload === lastCloudPayloadRef.current) return;
     const timeout = window.setTimeout(() => {
       setSyncStatus("saving");
-      void fetch("/api/progress", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ progress, expectedUpdatedAt: cloudUpdatedAtRef.current }),
-      }).then(async (response) => {
+      void fetch("/api/progress", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ progress, expectedUpdatedAt: cloudUpdatedAtRef.current }) }).then(async (response) => {
         const result = await response.json() as { conflict?: boolean; progress?: unknown; updatedAt?: number };
-        if (response.status === 409 && result.conflict && result.progress) {
-          setRemoteConflict({ progress: normalizeProgress(result.progress), updatedAt: Number(result.updatedAt) || 0 });
-          setSyncStatus("conflict");
-          return;
-        }
+        if (response.status === 409 && result.conflict && result.progress) { setRemoteConflict({ progress: normalizeProgress(result.progress), updatedAt: Number(result.updatedAt) || 0 }); setSyncStatus("conflict"); return; }
         if (!response.ok) throw new Error("sync failed");
-        cloudUpdatedAtRef.current = Number(result.updatedAt) || cloudUpdatedAtRef.current;
-        lastCloudPayloadRef.current = payload;
-        window.localStorage.setItem(STORAGE_TIME_KEY, String(cloudUpdatedAtRef.current));
-        setSyncStatus("synced");
+        cloudUpdatedAtRef.current = Number(result.updatedAt) || cloudUpdatedAtRef.current; lastCloudPayloadRef.current = payload; window.localStorage.setItem(STORAGE_TIME_KEY, String(cloudUpdatedAtRef.current)); setSyncStatus("synced");
       }).catch(() => setSyncStatus("error"));
-    }, 1000);
+    }, 900);
     return () => window.clearTimeout(timeout);
   }, [progress, ready, remoteConflict]);
+
+  useEffect(() => {
+    if (!ready) return;
+    const interact = () => { lastInteractionRef.current = Date.now(); };
+    ["pointerdown", "keydown", "touchstart"].forEach((name) => window.addEventListener(name, interact, { passive: true }));
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible" && document.hasFocus() && Date.now() - lastInteractionRef.current < 60000) update((current) => recordTrainingSeconds(current, 15));
+    }, 15000);
+    return () => { window.clearInterval(timer); ["pointerdown", "keydown", "touchstart"].forEach((name) => window.removeEventListener(name, interact)); };
+  }, [ready, update]);
 
   useEffect(() => {
     window.location.hash = view;
@@ -362,371 +181,96 @@ export default function SpanishApp() {
 
   useEffect(() => {
     if (!toast) return;
-    const timeout = window.setTimeout(() => setToast(null), 2400);
+    const timeout = window.setTimeout(() => setToast(""), 2500);
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
-  const nextUnit = courseUnits.find((item) => !progress.completedUnits.includes(item.id));
-  const coursePercent = Math.round(progress.completedUnits.length / courseUnits.length * 100);
-  const accuracy = progress.reviewCount ? Math.round(progress.correctCount / progress.reviewCount * 100) : 0;
-  const currentQuestion = session?.questions[questionIndex];
-  const displayedScore = session ? Math.round(sessionCorrect / session.questions.length * 100) : 0;
+  const archive = getArchive(progress);
+  const plan = archive.currentPlan!;
+  const level = levels[progress.selectedLevel];
+  const mission = missionsByLevel[progress.selectedLevel][plan.missionIndex];
+  const planComplete = Boolean(plan.completedOn);
+  const dayProgress = percent(plan.completedSteps.length, 7);
+  const missionCount = Math.min(12, Math.floor(archive.missionSessionCount / 3));
+  const bestExam = archive.examHistory.reduce((best, item) => Math.max(best, item.score), 0);
+  const graduation = graduationStatus(progress);
+  const corrections = dueCorrections(progress);
+  const skillAreas: SkillArea[] = ["vocabulary", "grammar", "listening", "reading", "sentence", "speaking"];
 
-  const libraryResults = useMemo(() => {
-    const query = search.trim().toLocaleLowerCase();
-    if (!query) return null;
-    if (libraryTab === "phrases") return phrases.filter((item) => `${item.spanish} ${item.translation} ${item.situation}`.toLocaleLowerCase().includes(query));
-    if (libraryTab === "words") return vocabulary.filter((item) => `${item.word} ${item.meaning} ${item.note ?? ""}`.toLocaleLowerCase().includes(query));
-    return patterns.filter((item) => `${item.pattern} ${item.meaning} ${item.example} ${item.translation}`.toLocaleLowerCase().includes(query));
-  }, [libraryTab, search]);
+  const filteredLibrary = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase("es");
+    const wordPool = allLexicon.filter((item) => levelOrder.indexOf(item.level) <= levelOrder.indexOf(progress.selectedLevel));
+    const grammarPool = allGrammar.filter((item) => levelOrder.indexOf(item.level) <= levelOrder.indexOf(progress.selectedLevel));
+    const missionPool = allMissions.filter((item) => levelOrder.indexOf(item.level) <= levelOrder.indexOf(progress.selectedLevel));
+    const soundPool = soundLessons.filter((item) => levelOrder.indexOf(item.level) <= levelOrder.indexOf(progress.selectedLevel));
+    if (!query) return { words: wordPool, grammar: grammarPool, missions: missionPool, sounds: soundPool };
+    const includes = (...values: string[]) => values.join(" ").toLocaleLowerCase("es").includes(query);
+    return {
+      words: wordPool.filter((item) => includes(item.spanish, item.english, item.cue)),
+      grammar: grammarPool.filter((item) => includes(item.title, item.formula, item.explanation, item.example, item.translation)),
+      missions: missionPool.filter((item) => includes(item.title, item.domain, item.canDo, item.model, item.translation)),
+      sounds: soundPool.filter((item) => includes(item.title, item.focus, item.tip, ...item.examples)),
+    };
+  }, [progress.selectedLevel, search]);
 
-  function navigate(next: View) {
-    setActiveUnit(null);
-    setSession(null);
-    setSessionFinished(false);
-    setView(next);
-  }
-
-  function openUnit(item: CourseUnit) {
-    setActiveUnit(item);
-    setSession(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function beginSession(next: Session) {
-    setActiveUnit(null);
-    setSession(next);
-    setQuestionIndex(0);
-    setAnswer(null);
-    setSessionCorrect(0);
-    setSessionFinished(false);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function chooseAnswer(option: string) {
-    if (!currentQuestion || answer) return;
-    setAnswer(option);
-    const correct = option === currentQuestion.answer;
-    if (correct) setSessionCorrect((value) => value + 1);
-    setProgress((current) => {
-      let next = updateStudyDay({
-        ...current,
-        xp: current.xp + (correct ? 8 : 2),
-        reviewCount: current.reviewCount + 1,
-        correctCount: current.correctCount + (correct ? 1 : 0),
-      });
-      if (correct && currentQuestion.skill === "Words") next = { ...next, learnedWords: unique([...next.learnedWords, currentQuestion.sourceId.replace("word:", "")]) };
-      if (correct && currentQuestion.skill === "Patterns") next = { ...next, learnedPatterns: unique([...next.learnedPatterns, currentQuestion.sourceId.replace("pattern:", "")]) };
-      if (correct && ["Meaning", "Listening"].includes(currentQuestion.skill)) next = { ...next, practicedPhrases: unique([...next.practicedPhrases, currentQuestion.sourceId.replace("phrase:", "")]) };
-      return next;
-    });
-  }
-
-  function advanceQuestion() {
-    if (!session || !currentQuestion) return;
-    if (questionIndex < session.questions.length - 1) {
-      setQuestionIndex((value) => value + 1);
-      setAnswer(null);
-      return;
+  function navigate(next: View) { setView(next); }
+  function openDaily() {
+    if (planComplete) {
+      if (archive.bonusDate === localDate()) { setToast("Today’s main and bonus learning days are complete"); return; }
+      setProgress((current) => startBonusPlan(current));
     }
-    const score = Math.round(sessionCorrect / session.questions.length * 100);
-    const passed = session.kind === "checkpoint" ? score >= 70 : score >= 75;
-    setProgress((current) => {
-      let next = updateStudyDay(current);
-      if (session.kind === "unit" && session.unit && passed) {
-        const completed = courseUnits.find((item) => item.id === session.unit)!;
-        next = {
-          ...next,
-          completedUnits: unique([...next.completedUnits, session.unit]),
-          learnedWords: unique([...next.learnedWords, ...completed.words.map((item) => item.word)]),
-          learnedPatterns: unique([...next.learnedPatterns, ...completed.patterns.map((item) => item.pattern)]),
-          practicedPhrases: unique([...next.practicedPhrases, ...completed.dialogue.map((_, index) => `${completed.id}:${index}`)]),
-          xp: next.xp + 60,
-        };
-      }
-      if (session.kind === "checkpoint") next = { ...next, checkpointScores: [...next.checkpointScores, score].slice(-20), xp: next.xp + (passed ? 100 : 30) };
-      return next;
-    });
-    setSessionFinished(true);
+    setCoachOpen(true);
   }
-
   function resolveConflict(choice: "device" | "cloud") {
     if (!remoteConflict) return;
-    if (choice === "cloud") {
-      window.localStorage.setItem(RECOVERY_KEY, JSON.stringify({ savedAt: Date.now(), progress }));
-      setProgress(remoteConflict.progress);
-      cloudUpdatedAtRef.current = remoteConflict.updatedAt;
-      lastCloudPayloadRef.current = JSON.stringify(remoteConflict.progress);
-      setRemoteConflict(null);
-      setSyncStatus("synced");
-      return;
-    }
-    cloudUpdatedAtRef.current = remoteConflict.updatedAt;
-    lastCloudPayloadRef.current = "";
-    setRemoteConflict(null);
-    setSyncStatus("saving");
-    setProgress((current) => ({ ...current }));
+    if (choice === "cloud") { window.localStorage.setItem(RECOVERY_KEY, JSON.stringify({ savedAt: Date.now(), progress })); setProgress(remoteConflict.progress); cloudUpdatedAtRef.current = remoteConflict.updatedAt; lastCloudPayloadRef.current = JSON.stringify(remoteConflict.progress); setRemoteConflict(null); setSyncStatus("synced"); return; }
+    cloudUpdatedAtRef.current = remoteConflict.updatedAt; lastCloudPayloadRef.current = ""; setRemoteConflict(null); setSyncStatus("saving"); setProgress((current) => ({ ...current }));
   }
-
   function exportProgress() {
-    const blob = new Blob([JSON.stringify({ app: "Dilo", exportedAt: new Date().toISOString(), progress }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `dilo-progress-${todayKey()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setToast("Progress backup downloaded");
+    const blob = new Blob([JSON.stringify({ app: "Dilo", version: APP_VERSION, exportedAt: new Date().toISOString(), progress }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = `dilo-spanish-${localDate()}.json`; link.click(); URL.revokeObjectURL(url); setToast("Progress backup downloaded");
   }
-
   async function importProgress(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    try {
-      const parsed = JSON.parse(await file.text()) as { app?: string; progress?: unknown };
-      if (parsed.app !== "Dilo" || !parsed.progress) throw new Error("wrong format");
-      setProgress(normalizeProgress(parsed.progress));
-      setToast("Dilo progress restored");
-    } catch {
-      setToast("That file is not a Dilo backup");
-    }
+    const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
+    try { const parsed = JSON.parse(await file.text()) as { app?: string; progress?: unknown }; if (parsed.app !== "Dilo" || !parsed.progress) throw new Error("format"); setProgress(normalizeProgress(parsed.progress)); setToast("Dilo progress restored"); } catch { setToast("That file is not a Dilo backup"); }
   }
+  function resetProgress() { setProgress(normalizeProgress({ version: 2, onboarded: true, goal: progress.goal, dailyMinutes: progress.dailyMinutes, dailyNew: progress.dailyNew })); setShowReset(false); setView("today"); setToast("Progress reset"); }
+  async function installApp() { if (!installPrompt) return; await installPrompt.prompt(); await installPrompt.userChoice; setInstallPrompt(null); }
 
-  function resetProgress() {
-    setProgress({ ...starterProgress(), onboarded: true, goal: progress.goal, dailyGoal: progress.dailyGoal });
-    setShowReset(false);
-    navigate("today");
-    setToast("Progress reset");
-  }
+  if (!ready) return <main className="loading-screen"><div className="loading-sun"><span>di</span></div><p>Preparando tu camino…</p></main>;
+  if (coachOpen) return <DailyCoach progress={progress} update={update} close={() => setCoachOpen(false)} />;
+  if (drill) return <DrillSession progress={progress} update={update} kind={drill} close={() => setDrill(null)} />;
+  if (correctionsOpen) return <CorrectionLab progress={progress} update={update} close={() => setCorrectionsOpen(false)} />;
+  if (examOpen) return <Checkpoint progress={progress} update={update} close={() => setExamOpen(false)} />;
 
-  if (!ready) {
-    return <main className="loading-screen"><div className="loading-sun"><span>di</span></div><p>Preparando tu camino…</p></main>;
-  }
+  return <div className="app-shell"><header className="site-header"><button className="brand" onClick={() => navigate("today")} aria-label="Dilo home"><span className="brand-mark"><i>di</i><b /></span><span><strong>Dilo</strong><small>Spanish from first words to fluency</small></span></button><div className="header-level"><button onClick={() => navigate("course")}><span>{progress.selectedLevel}</span><b>{level.name}</b></button></div><div className="header-status"><span className={`sync-dot ${syncStatus}`} /><span>{syncStatus === "synced" ? "Cloud saved" : syncStatus === "saving" || syncStatus === "checking" ? "Saving…" : syncStatus === "conflict" ? "Choose a copy" : "On this device"}</span><b>{progress.streak} day{progress.streak === 1 ? "" : "s"}</b></div></header>
 
-  if (session && currentQuestion) {
-    return (
-      <main className="session-shell">
-        <header className="session-topbar">
-          <button onClick={() => setSession(null)} aria-label="Close practice">×</button>
-          <div><span>{session.eyebrow}</span><strong>{session.title}</strong></div>
-          <small>{questionIndex + 1} / {session.questions.length}</small>
-        </header>
-        <div className="session-progress"><i style={{ width: `${(questionIndex + (answer ? 1 : 0)) / session.questions.length * 100}%` }} /></div>
-        {!sessionFinished ? (
-          <section className="quiz-stage">
-            <div className={`quiz-prompt ${currentQuestion.listening ? "listening" : ""}`}>
-              <span>{currentQuestion.note}</span>
-              <h1>{currentQuestion.prompt}</h1>
-              {currentQuestion.speech && (
-                <button className="sound-button" onClick={() => speakSpanish(currentQuestion.speech!)} aria-label={`Hear ${currentQuestion.speech}`}>
-                  <b aria-hidden="true">◖))</b><small>{currentQuestion.listening ? "Play audio" : "Hear it"}</small>
-                </button>
-              )}
-            </div>
-            <div className="answer-grid">
-              {currentQuestion.options.map((option, index) => {
-                const correct = answer && option === currentQuestion.answer;
-                const wrong = answer === option && option !== currentQuestion.answer;
-                const muted = answer && !correct && !wrong;
-                return <button key={`${option}-${index}`} disabled={Boolean(answer)} className={correct ? "correct" : wrong ? "wrong" : muted ? "muted" : ""} onClick={() => chooseAnswer(option)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>;
-              })}
-            </div>
-            {answer && (
-              <div className={`answer-ribbon ${answer === currentQuestion.answer ? "" : "wrong"}`}>
-                <div>
-                  <strong>{answer === currentQuestion.answer ? "¡Muy bien!" : `Not quite — ${currentQuestion.answer}`}</strong>
-                  <span>{currentQuestion.explanation ?? (answer === currentQuestion.answer ? "That phrase is ready for real life." : "Say the answer once before moving on.")}</span>
-                </div>
-                <button onClick={advanceQuestion}>{questionIndex === session.questions.length - 1 ? "See result" : "Continue"} →</button>
-              </div>
-            )}
-          </section>
-        ) : (
-          <section className="session-result">
-            <div className="result-sun"><span>{displayedScore >= (session.kind === "checkpoint" ? 70 : 75) ? "sí" : "otra"}</span></div>
-            <p>{displayedScore >= (session.kind === "checkpoint" ? 70 : 75) ? "STEP CLEARED" : "ONE MORE PASS"}</p>
-            <h1>{displayedScore}%</h1>
-            <h2>{sessionCorrect} of {session.questions.length} correct</h2>
-            <p>{displayedScore >= 75 ? "You made these words usable. Keep the rhythm small and regular." : "The misses are useful directions. Hear the answers once, then try the set again."}</p>
-            <div><button className="primary-action" onClick={() => setSession(null)}>Back to Dilo <span>→</span></button><button onClick={() => beginSession({ ...session, questions: shuffled(session.questions) })}>Try again</button></div>
-          </section>
-        )}
-      </main>
-    );
-  }
+    {account.mode === "device" && <div className="device-banner" role="status"><div><strong>Public device copy</strong><span>Progress stays in this browser. Export a backup or use the synced app.</span></div><a href={SYNCED_APP_URL}>Open synced Dilo →</a></div>}
 
-  if (activeUnit) {
-    const complete = progress.completedUnits.includes(activeUnit.id);
-    return (
-      <main className="lesson-shell">
-        <header className="lesson-topbar">
-          <button onClick={() => setActiveUnit(null)} aria-label="Back to course">←</button>
-          <span>RUTA {String(activeUnit.id).padStart(2, "0")} · {activeUnit.stage}</span>
-          <small>{complete ? "Completed" : "In progress"}</small>
-        </header>
-        <section className={`lesson-hero ${activeUnit.color}`}>
-          <div><span>REAL-LIFE MISSION</span><h1>{activeUnit.title}</h1><p>{activeUnit.situation}</p></div>
-          <strong>{activeUnit.spanish}</strong>
-        </section>
-        <section className="lesson-body">
-          <div className="lesson-section-head"><span>01 · LISTEN</span><h2>First, hear the exchange.</h2><p>Play each line. Read once, then look away and echo the rhythm.</p></div>
-          <div className="dialogue-card">
-            {activeUnit.dialogue.map((line, index) => <button key={`${line.line}-${index}`} onClick={() => speakSpanish(line.line)}><b>{line.speaker}</b><span><strong>{line.line}</strong><small>{line.translation}</small></span><i aria-hidden="true">◖))</i></button>)}
-          </div>
-          <div className="lesson-section-head"><span>02 · NOTICE</span><h2>Words worth keeping.</h2><p>Small, high-frequency pieces you can recombine outside this lesson.</p></div>
-          <div className="lesson-word-grid">
-            {activeUnit.words.map((item) => <button key={item.word} onClick={() => speakSpanish(item.word.replace("/a", "a"))}><span>{item.word}</span><strong>{item.meaning}</strong><small>{item.note ?? "Tap to hear"}</small></button>)}
-          </div>
-          <div className="lesson-section-head"><span>03 · BUILD</span><h2>Two patterns. Many sentences.</h2><p>Swap the final piece and the pattern becomes yours.</p></div>
-          <div className="pattern-grid">
-            {activeUnit.patterns.map((item) => <article key={item.pattern}><span>USE THIS FRAME</span><h3>{item.pattern}</h3><p>{item.meaning}</p><button onClick={() => speakSpanish(item.example)}>◖)) {item.example}</button><small>{item.translation}</small></article>)}
-          </div>
-          <div className="lesson-finish">
-            <div><span>04 · MAKE IT STICK</span><h2>Ready for a ten-question check?</h2><p>Score 75% to clear this route. You can repeat it whenever you like.</p></div>
-            <button className="primary-action" onClick={() => beginSession({ title: activeUnit.title, eyebrow: `Ruta ${activeUnit.id} · ${activeUnit.stage}`, questions: unitQuestions(activeUnit), kind: "unit", unit: activeUnit.id })}>{complete ? "Review route" : "Start the check"}<span>→</span></button>
-          </div>
-        </section>
-      </main>
-    );
-  }
+    <main className="main-content">
+      {view === "today" && <section className="today-view view-enter"><div className="today-hero"><div className="hero-copy"><span className="eyebrow">HOY · {progress.selectedLevel} · LEARNING DAY {plan.learningDay + 1}</span><h1>Speak sooner.<br />Grow into <em>fluency.</em></h1><p>Dilo trains one connected ability: remember useful Spanish, understand it at speed, shape accurate sentences, and carry a real exchange aloud.</p><div className="hero-meta"><span>{progress.goal}</span><span>{progress.dailyMinutes} minute rhythm</span><span>{progress.dailyNew} new lexical chunks</span></div></div><div className="hero-art" aria-hidden="true"><span>¡</span><b>DI</b><i>LO!</i><em /></div></div>
+        <div className="today-grid"><article className="next-card daily-card"><div className="card-topline"><span>{planComplete ? "TODAY COMPLETE" : `NEXT · ${plan.completedSteps.length + 1} OF 7`}</span><small>{dayProgress}% of today</small></div><span className="route-number">{String(plan.learningDay + 1).padStart(2, "0")}</span><div className="route-copy"><span>{level.milestone} · {mission.domain}</span><h2>{mission.title}</h2><p>{mission.situation} Today moves through cards, recall, grammar, listening, building, reading, and a four-line speaking mission.</p><button className="primary-action" onClick={openDaily} disabled={planComplete && archive.bonusDate === localDate()}>{planComplete ? archive.bonusDate === localDate() ? "Two sessions complete" : "Start one bonus day" : plan.completedSteps.length ? "Resume exact step" : "Begin today"}<span>→</span></button></div><div className="route-progress"><i style={{ width: `${Math.max(4, dayProgress)}%` }} /></div></article><aside className="today-side"><article className="rhythm-card"><div className="mini-sun"><span>{progress.streak}</span></div><div><small>CURRENT RHYTHM</small><strong>{progress.streak} day{progress.streak === 1 ? "" : "s"}</strong><p>Missed calendar days create no lesson backlog.</p></div></article><article className="quick-card"><span>DUE NOW</span><h3>{corrections.length ? `${corrections.length} correction${corrections.length === 1 ? "" : "s"} waiting.` : "Your correction queue is clear."}</h3><div><button onClick={() => setCorrectionsOpen(true)}><b>↺</b><span>Correction loop<small>Correct now, then once on a later day</small></span><i>→</i></button><button onClick={() => setDrill("listening")}><b>OÍ</b><span>Listening sprint<small>12 items · normal-speed audio</small></span><i>→</i></button></div></article></aside></div>
+        <div className="daily-map">{(["Cards", "Recall", "Grammar", "Listen", "Build", "Read", "Speak"] as const).map((label, index) => <article key={label} className={index < plan.completedSteps.length ? "done" : index === plan.completedSteps.length ? "next" : ""}><span>{index < plan.completedSteps.length ? "✓" : index + 1}</span><b>{label}</b><small>{["meet", "retrieve", "notice", "understand", "assemble", "connect", "perform"][index]}</small></article>)}</div>
+        <div className="scope-strip fluency-scope"><span>THE COMPLETE DILO PATH</span><div><strong>{curriculumTotals.levels}</strong><small>CEFR levels</small></div><div><strong>{curriculumTotals.guidedSessions}</strong><small>guided days</small></div><div><strong>{curriculumTotals.missions}</strong><small>real missions</small></div><div><strong>{curriculumTotals.lexicon}</strong><small>core chunks</small></div><button onClick={() => navigate("course")}>See A1 → C2 →</button></div>
+        <article className="fluency-note"><span>B2 IS THE CONVERSATIONAL FLUENCY THRESHOLD</span><h2>The path continues after “fluent.”</h2><p>At B2, regular interaction can become spontaneous and relatively unstrained. C1 develops flexible advanced fluency; C2 develops nuanced mastery. Dilo supplies a guided core—not a promise that app completion alone replaces hundreds of hours of real listening, reading, writing, and conversation.</p></article>
+      </section>}
 
-  return (
-    <div className="app-shell">
-      <header className="site-header">
-        <button className="brand" onClick={() => navigate("today")} aria-label="Dilo home">
-          <span className="brand-mark"><i>di</i><b aria-hidden="true" /></span>
-          <span><strong>Dilo</strong><small>Spanish you can use today</small></span>
-        </button>
-        <div className="header-status">
-          <span className={`sync-dot ${syncStatus}`} aria-hidden="true" />
-          <span>{syncStatus === "synced" ? "Cloud saved" : syncStatus === "saving" || syncStatus === "checking" ? "Saving…" : syncStatus === "conflict" ? "Choose a copy" : "On this device"}</span>
-          <b>{progress.streak || 0} día{progress.streak === 1 ? "" : "s"}</b>
-        </div>
-      </header>
+      {view === "course" && <section className="path-view view-enter"><div className="section-intro"><span className="eyebrow">LA RUTA · CEFR A1 TO C2</span><h1>Survival first.<br /><em>Nuance last.</em></h1><p>Each level contains 12 real-world missions. Every mission runs through three phases: establish, vary, and perform. Finish the learning core, clear corrections, and score 80% to advance.</p></div><div className="cefr-road">{levelOrder.map((id, index) => { const meta = levels[id]; const itemArchive = progress.archives[id]; const sessions = itemArchive?.missionSessionCount ?? 0; const complete = progress.graduatedLevels.includes(id); const accessible = index <= progress.graduatedLevels.length; const active = progress.selectedLevel === id; return <article key={id} className={`cefr-level ${meta.color} ${complete ? "complete" : ""} ${active ? "active" : ""} ${!accessible ? "locked" : ""}`}><div className="cefr-code"><span>{complete ? "✓" : id}</span><small>{meta.milestone}</small></div><div><span>{meta.name}</span><h2>{meta.promise}</h2><p>{meta.description}</p><ul><li>12 missions × 3 phases</li><li>{lexiconByLevel[id].length} core lexical chunks</li><li>{grammarByLevel[id].length} grammar systems</li><li>{levelSoundLessons(id).length} pronunciation labs</li></ul><div className="level-meter"><i><em style={{ width: `${Math.min(100, sessions / 36 * 100)}%` }} /></i><small>{Math.min(36, sessions)}/36 guided sessions</small></div><p className="outside-work">Beyond Dilo: {meta.outsideHours}</p></div><button disabled={!accessible || active} onClick={() => setProgress((current) => switchLevel(current, id))}>{active ? "Current level" : complete ? "Review level" : accessible ? `Enter ${id}` : "Graduate previous level"}</button></article>; })}</div><div className="mission-map"><div><span className="eyebrow">{progress.selectedLevel} · MISSION MAP</span><h2>Twelve things you will be able to do.</h2></div><div>{missionsByLevel[progress.selectedLevel].map((item, index) => { const phase = Math.max(0, Math.min(3, archive.missionSessionCount - index * 3)); return <article key={item.id}><span>{String(index + 1).padStart(2, "0")} · {item.domain}</span><h3>{item.title}</h3><p>{item.canDo}</p><i>{[0, 1, 2].map((dot) => <b key={dot} className={dot < phase ? "done" : ""} />)}</i></article>; })}</div></div></section>}
 
-      {account.mode === "device" && <div className="device-banner" role="status"><div><strong>Public device copy</strong><span>Your progress is saved in this browser. Export a backup before switching devices.</span></div><a href={SYNCED_APP_URL}>Open synced Dilo →</a></div>}
+      {view === "practice" && <section className="practice-view view-enter"><div className="section-intro compact"><span className="eyebrow">PRÁCTICA · DELIBERATE WORK</span><h1>Train the weak link.<br /><em>Then reconnect it.</em></h1><p>Practice sets are separate from today’s teaching cadence. They add retrieval and feedback without moving the learning-day scheduler.</p></div><div className="practice-grid expanded"><button className="practice-card clay" onClick={() => setDrill("recall")}><span>01 · RETRIEVAL</span><b>RE</b><h2>Recall sprint</h2><p>English-to-Spanish retrieval across the current level’s lexical core.</p><small>12 prompts · corrections on every miss</small></button><button className="practice-card blue" onClick={() => setDrill("listening")}><span>02 · EAR</span><b>OÍ</b><h2>Listening bank</h2><p>Understand natural mission lines before you see their transcript.</p><small>12 prompts · Spanish audio</small></button><button className="practice-card olive" onClick={() => setDrill("sentences")}><span>03 · FORM</span><b>DI</b><h2>Sentence lab</h2><p>Connect grammar meaning to complete, useful Spanish sentences.</p><small>12 prompts · mixed grammar</small></button><button className="practice-card gold" onClick={() => { setLibraryTab("sounds"); navigate("library"); }}><span>04 · PRONUNCIATION</span><b>R</b><h2>Sound & rhythm gym</h2><p>Vowels, stress, consonants, linking, intonation, register, and delivery.</p><small>{levelSoundLessons(progress.selectedLevel).length} labs at this level</small></button><button className="practice-card ink" onClick={() => setCorrectionsOpen(true)}><span>05 · CORRECTIONS</span><b>↺</b><h2>Correction loop</h2><p>Every objective miss returns until retrieved correctly on two learning days.</p><small>{corrections.length} due · {progress.corrections.filter((item) => item.level === progress.selectedLevel).length} pending</small></button><button className="practice-card plum" onClick={() => setExamOpen(true)}><span>06 · CHECKPOINT</span><b>40</b><h2>{progress.selectedLevel} checkpoint</h2><p>Twenty listening and twenty reading/usage questions under a forty-minute clock.</p><small>80% graduation target · best {bestExam || "—"}{bestExam ? "%" : ""}</small></button></div><div className="skill-panel"><div><span className="eyebrow">YOUR SIX-SKILL SIGNAL</span><h2>Accuracy by what you actually do.</h2><p>Coverage never pretends to be mastery. These scores come only from answers and performances you submit.</p></div><div>{skillAreas.map((skill) => <article key={skill}><span>{skill}</span><strong>{skillAccuracy(progress, skill) || "—"}{skillAccuracy(progress, skill) ? "%" : ""}</strong><i><em style={{ width: `${skillAccuracy(progress, skill)}%` }} /></i></article>)}</div></div></section>}
 
-      <main className="main-content">
-        {view === "today" && (
-          <section className="today-view view-enter">
-            <div className="today-hero">
-              <div className="hero-copy">
-                <span className="eyebrow">HOY · YOUR DAILY SPANISH</span>
-                <h1>Speak sooner.<br />Remember <em>longer.</em></h1>
-                <p>Learn the Spanish you actually reach for—one useful exchange, a handful of words, and a little speaking every day.</p>
-                <div className="hero-meta"><span>{progress.goal}</span><span>{progress.dailyGoal} min rhythm</span></div>
-              </div>
-              <div className="hero-art" aria-hidden="true"><span>¡</span><b>DI</b><i>LO!</i><em /></div>
-            </div>
+      {view === "library" && <section className="library-view view-enter"><div className="library-head"><div><span className="eyebrow">A MANO · SEARCHABLE REFERENCE</span><h1>Words, structures,<br /><em>missions, sounds.</em></h1></div><label><span>Search Spanish or English through {progress.selectedLevel}</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Try: agreement, aunque, travel…" /></label></div><div className="library-tabs four" role="tablist">{(["words", "grammar", "missions", "sounds"] as LibraryTab[]).map((tab) => <button key={tab} role="tab" aria-selected={libraryTab === tab} className={libraryTab === tab ? "active" : ""} onClick={() => setLibraryTab(tab)}>{tab}<span>{filteredLibrary[tab].length}</span></button>)}</div>{libraryTab === "words" && <div className="word-library">{filteredLibrary.words.map((item) => <button key={item.id} onClick={() => speakSpanish(item.spanish)}><span><small>{item.level} · LEXICAL CHUNK</small><strong>{item.spanish}</strong><b>{item.cue}</b></span><p>{item.english}</p><i>◖))</i></button>)}</div>}{libraryTab === "grammar" && <div className="grammar-library">{filteredLibrary.grammar.map((item) => <article key={item.id}><span>{item.level} · {item.title}</span><h3>{item.formula}</h3><p>{item.explanation}</p><button onClick={() => speakSpanish(item.example)}>◖)) {item.example}</button><small>{item.translation}</small></article>)}</div>}{libraryTab === "missions" && <div className="mission-library">{filteredLibrary.missions.map((item) => <article key={item.id}><span>{item.level} · {item.domain}</span><h3>{item.title}</h3><p>{item.canDo}</p><button onClick={() => speakSpanish(item.model)}><strong>{item.model}</strong><small>{item.translation}</small><i>◖))</i></button></article>)}</div>}{libraryTab === "sounds" && <div className="sound-library">{filteredLibrary.sounds.map((item) => <article key={item.id}><span>{item.level} · SOUND & RHYTHM</span><h3>{item.title}</h3><b>{item.focus}</b><p>{item.tip}</p><div>{item.examples.map((example) => <button key={example} onClick={() => { speakSpanish(example, .7); update((current) => recordSkill(current, "pronunciation", true)); }}>{example}<i>◖))</i></button>)}</div></article>)}</div>}</section>}
 
-            <div className="today-grid">
-              <article className="next-card">
-                <div className="card-topline"><span>NEXT REAL-LIFE ROUTE</span><small>{coursePercent}% course</small></div>
-                <span className="route-number">{String(nextUnit?.id ?? 8).padStart(2, "0")}</span>
-                <div className="route-copy">
-                  <span>{nextUnit ? nextUnit.stage : "A1 CHECKPOINT"}</span>
-                  <h2>{nextUnit?.spanish ?? "Ya puedes."}</h2>
-                  <p>{nextUnit?.promise ?? "You cleared every route. Keep your Spanish warm with mixed practice."}</p>
-                  <button className="primary-action" onClick={() => nextUnit ? openUnit(nextUnit) : beginSession({ title: "A1 checkpoint", eyebrow: "All eight routes", questions: shuffled(checkpointQuestions).map((item, index) => ({ ...item, skill: "Meaning", sourceId: `checkpoint:${index}` })), kind: "checkpoint" })}>{progress.xp ? "Continue today" : "Start speaking"}<span>→</span></button>
-                </div>
-                <div className="route-progress"><i style={{ width: `${Math.max(7, coursePercent)}%` }} /></div>
-              </article>
+      {view === "checkpoint" && <section className="checkpoint-view view-enter"><div className="checkpoint-hero"><span>{progress.selectedLevel} · READINESS</span><h1>Graduation is<br /><em>five pieces, not one score.</em></h1><p>Dilo checks introduced vocabulary, introduced grammar, mission performance, an empty correction queue, and a timed checkpoint. This prevents recognition alone from masquerading as usable Spanish.</p><button className="primary-action" onClick={() => setExamOpen(true)}>Take 40-question checkpoint <span>→</span></button></div><div className="requirements">{graduation.requirements.map((item, index) => <article key={item.label} className={item.met ? "met" : ""}><span>{item.met ? "✓" : index + 1}</span><div><small>{item.label}</small><strong>{item.current} / {item.target}</strong></div><i><em style={{ width: `${Math.min(100, item.current / item.target * 100)}%` }} /></i></article>)}</div><article className={`graduation-card ${graduation.ready ? "ready" : ""}`}><div><span>{graduation.ready ? "READY TO ADVANCE" : "KEEP BUILDING"}</span><h2>{graduation.ready ? `${progress.selectedLevel} is complete.` : `${graduation.requirements.filter((item) => !item.met).length} requirements remain.`}</h2><p>{progress.selectedLevel === "B2" ? "Completing B2 marks the conversational fluency threshold; C1 and C2 remain available for advanced fluency and mastery." : level.description}</p></div><button disabled={!graduation.ready} onClick={() => setProgress((current) => graduateLevel(current))}>{progress.selectedLevel === "C2" ? "Mark mastery complete" : `Advance beyond ${progress.selectedLevel}`} <span>→</span></button></article><div className="exam-history"><span className="eyebrow">CHECKPOINT HISTORY</span>{archive.examHistory.length ? <div>{archive.examHistory.map((item, index) => <article key={`${item.at}-${index}`} className={item.score >= 80 ? "pass" : ""}><strong>{item.score}%</strong><span>{item.correct}/{item.total}</span><small>{item.at.startsWith("legacy") ? "Imported attempt" : new Date(item.at).toLocaleDateString()}</small></article>)}</div> : <p>No attempts yet. Take the checkpoint when you want a baseline; it does not consume your daily session.</p>}</div></section>}
 
-              <aside className="today-side">
-                <article className="rhythm-card"><div className="mini-sun"><span>{progress.streak || 0}</span></div><div><small>CURRENT RHYTHM</small><strong>{progress.streak || 0} day{progress.streak === 1 ? "" : "s"}</strong><p>Your first answer today keeps it going.</p></div></article>
-                <article className="quick-card"><span>QUICK PRACTICE · 3–5 MIN</span><h3>Put Spanish on your tongue.</h3><div><button onClick={() => beginSession({ title: "Listen & choose", eyebrow: "Ten everyday lines", questions: listeningQuestions(), kind: "drill" })}><b>◖))</b><span>Listen & choose<small>{progress.practicedPhrases.length} phrases heard</small></span><i>→</i></button><button onClick={() => beginSession({ title: "Situation lab", eyebrow: "What would you say?", questions: situationQuestions(), kind: "drill" })}><b>¿?</b><span>Situation lab<small>Real-life response practice</small></span><i>→</i></button></div></article>
-              </aside>
-            </div>
+      {view === "progress" && <section className="progress-view view-enter"><div className="section-intro compact"><span className="eyebrow">TU RITMO · HONEST PROGRESS</span><h1>Useful Spanish,<br /><em>adding up.</em></h1><p>Dilo distinguishes exposure, retrieval accuracy, active study time, and demonstrated mission performance.</p></div><div className="stat-cards"><article><span>DÍAS</span><strong>{progress.streak}</strong><p>calendar rhythm</p></article><article><span>ACTIVO</span><strong>{formatDuration(progress.trainingSeconds)}</strong><p>focused study time</p></article><article><span>MISIÓN</span><strong>{missionCount}/12</strong><p>{progress.selectedLevel} missions</p></article><article><span>EXAMEN</span><strong>{bestExam || "—"}{bestExam ? "%" : ""}</strong><p>best checkpoint</p></article></div><div className="coverage-panel"><div><span className="eyebrow">{progress.selectedLevel} COVERAGE</span><h2>{level.milestone}</h2><p>{level.promise}</p></div><div className="coverage-bars"><div><span>Lexical core introduced <b>{archive.learnedWordIds.length}/{lexiconByLevel[progress.selectedLevel].length}</b></span><i><em style={{ width: `${percent(archive.learnedWordIds.length, lexiconByLevel[progress.selectedLevel].length)}%` }} /></i></div><div><span>Grammar introduced <b>{archive.learnedGrammarIds.length}/{grammarByLevel[progress.selectedLevel].length}</b></span><i><em style={{ width: `${percent(archive.learnedGrammarIds.length, grammarByLevel[progress.selectedLevel].length)}%` }} /></i></div><div><span>Mission sessions <b>{Math.min(36, archive.missionSessionCount)}/36</b></span><i><em style={{ width: `${Math.min(100, archive.missionSessionCount / 36 * 100)}%` }} /></i></div></div></div><div className="progress-bottom"><article className={`cloud-card ${syncStatus}`}><span className="sync-dot" /><div><small>{account.mode === "signed-in" ? "SIGNED-IN PROGRESS" : "DEVICE PROGRESS"}</small><h3>{syncStatus === "synced" ? "Your exact learning step follows you." : syncStatus === "conflict" ? "Two progress copies need a choice." : account.mode === "device" ? "Safe in this browser." : "Checking your saved copy…"}</h3><p>{account.mode === "signed-in" ? `${account.displayName ?? account.email ?? "Your account"} · private progress, scheduler, corrections, and history` : "The public GitHub Pages copy is local-only. Export a backup or open the synced Sites release."}</p>{account.mode === "device" && <a href={`${SYNCED_APP_URL}/#progress`}>Open synced Dilo →</a>}</div></article><article className="backup-card"><small>OWN YOUR COPY · v{APP_VERSION}</small><h3>Backup, install, restore</h3><p>Exports include every CEFR archive, review schedule, correction, and checkpoint.</p><div><button onClick={exportProgress}>Export</button><button onClick={() => importRef.current?.click()}>Import</button>{installPrompt && <button onClick={() => void installApp()}>Install</button>}<button className="danger" onClick={() => setShowReset(true)}>Reset</button></div><input ref={importRef} type="file" accept="application/json" onChange={(event) => void importProgress(event)} hidden /></article></div><div className="active-days"><span className="eyebrow">RECENT ACTIVE DAYS</span><div>{Array.from({ length: 42 }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - (41 - index)); const key = localDate(date); return <i key={key} className={progress.activeDays.includes(key) ? "active" : ""} title={key} />; })}</div><p>Active time counts only while Dilo is visible, focused, and you interacted within the last minute.</p></div></section>}
+    </main>
 
-            <div className="scope-strip">
-              <span>A COMPLETE STARTING RHYTHM</span>
-              <div><strong>{curriculumTotals.units}</strong><small>real-life routes</small></div>
-              <div><strong>{curriculumTotals.words}</strong><small>core words</small></div>
-              <div><strong>{curriculumTotals.patterns}</strong><small>sentence frames</small></div>
-              <div><strong>{curriculumTotals.phrases}</strong><small>spoken lines</small></div>
-              <button onClick={() => navigate("path")}>See the full path →</button>
-            </div>
-          </section>
-        )}
+    <nav className="main-nav" aria-label="Primary navigation"><button className={view === "today" ? "active" : ""} onClick={() => navigate("today")}><span>HOY</span><small>Today</small></button><button className={view === "course" ? "active" : ""} onClick={() => navigate("course")}><span>A→C</span><small>Course</small></button><button className={view === "practice" ? "active" : ""} onClick={() => navigate("practice")}><span>DI</span><small>Practice</small></button><button className={view === "library" ? "active" : ""} onClick={() => navigate("library")}><span>ABC</span><small>Library</small></button><button className={view === "checkpoint" ? "active" : ""} onClick={() => navigate("checkpoint")}><span>40</span><small>Check</small></button><button className={view === "progress" ? "active" : ""} onClick={() => navigate("progress")}><span>+</span><small>Progress</small></button></nav>
 
-        {view === "path" && (
-          <section className="path-view view-enter">
-            <div className="section-intro"><span className="eyebrow">LA RUTA · YOUR A1 PATH</span><h1>Eight stops.<br /><em>One real voice.</em></h1><p>Each route starts with a scene you might live this week. Listen first, notice the pattern, then make it your own.</p></div>
-            <div className="path-summary"><span>START HERE</span><strong>{coursePercent}%</strong><p>{progress.completedUnits.length} of {courseUnits.length} routes cleared</p><i><em style={{ width: `${coursePercent}%` }} /></i></div>
-            <div className="unit-road">
-              {courseUnits.map((item) => {
-                const complete = progress.completedUnits.includes(item.id);
-                const unlocked = item.id === 1 || progress.completedUnits.includes(item.id - 1);
-                return <article key={item.id} className={`road-unit ${item.color} ${complete ? "complete" : ""} ${!unlocked ? "locked" : ""}`}><div className="road-node"><span>{complete ? "✓" : String(item.id).padStart(2, "0")}</span></div><div className="road-card"><div><small>{item.stage}</small><h2>{item.title}</h2><b>{item.spanish}</b><p>{item.promise}</p><ul><li>{item.words.length} words</li><li>{item.patterns.length} patterns</li><li>{item.dialogue.length} spoken lines</li></ul></div><button disabled={!unlocked} onClick={() => openUnit(item)}>{complete ? "Review route" : unlocked ? "Open route" : "Clear the route above"}<span>{unlocked ? "→" : "•"}</span></button></div></article>;
-              })}
-            </div>
-          </section>
-        )}
-
-        {view === "practice" && (
-          <section className="practice-view view-enter">
-            <div className="section-intro compact"><span className="eyebrow">PRÁCTICA · FOCUSED SETS</span><h1>Train the part<br />that needs <em>another turn.</em></h1><p>Short sets pull from the entire course. Listen, recall, and choose what you would actually say.</p></div>
-            <div className="practice-grid">
-              <button className="practice-card clay" onClick={() => beginSession({ title: "Word sprint", eyebrow: "Ten useful words", questions: shuffled(vocabulary).slice(0, 10).map(wordQuestion), kind: "drill" })}><span>01 · RECALL</span><b>PA</b><h2>Word sprint</h2><p>Quick English-to-Spanish choices across food, travel, people, and daily life.</p><small>10 prompts · mixed routes</small></button>
-              <button className="practice-card blue" onClick={() => beginSession({ title: "Listen & choose", eyebrow: "Ten everyday lines", questions: listeningQuestions(), kind: "drill" })}><span>02 · EAR</span><b>OÍ</b><h2>Listen & choose</h2><p>Hear natural phrases at a calm pace and pick the line that matches.</p><small>10 prompts · audio support</small></button>
-              <button className="practice-card olive" onClick={() => beginSession({ title: "Situation lab", eyebrow: "What would you say?", questions: situationQuestions(), kind: "drill" })}><span>03 · RESPONSE</span><b>DI</b><h2>Situation lab</h2><p>Order, ask, recover, invite, and respond without translating word by word.</p><small>10 prompts · real-life choices</small></button>
-              <button className="practice-card ink" onClick={() => beginSession({ title: "A1 checkpoint", eyebrow: "All eight routes", questions: shuffled(checkpointQuestions).map((item, index) => ({ ...item, skill: "Meaning", sourceId: `checkpoint:${index}` })), kind: "checkpoint" })}><span>04 · CHECKPOINT</span><b>SÍ</b><h2>A1 mini check</h2><p>A mixed sweep of vocabulary, listening, useful patterns, and conversation recovery.</p><small>16 prompts · 70% target</small></button>
-            </div>
-            <div className="accuracy-panel"><div><span className="eyebrow">YOUR SIGNAL</span><h2>{progress.reviewCount ? `${accuracy}% across ${progress.reviewCount} answers.` : "Your signal begins with one answer."}</h2><p>{accuracy >= 80 ? "Recognition is steady. Add speed without losing the sound." : progress.reviewCount ? "Keep the sets short; each miss points to a useful next repetition." : "Choose any set above to establish a starting point."}</p></div><div className="accuracy-ring" style={{ "--score": `${accuracy * 3.6}deg` } as React.CSSProperties}><span>{accuracy || "—"}<small>{accuracy ? "%" : ""}</small></span></div></div>
-          </section>
-        )}
-
-        {view === "phrasebook" && (
-          <section className="library-view view-enter">
-            <div className="library-head"><div><span className="eyebrow">A MANO · YOUR PHRASEBOOK</span><h1>Everything useful,<br /><em>within reach.</em></h1></div><label><span>Search Spanish or English</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Try: coffee, reserva, ¿dónde…?" /></label></div>
-            <div className="library-tabs" role="tablist">{(["phrases", "words", "patterns"] as LibraryTab[]).map((tab) => <button key={tab} role="tab" aria-selected={libraryTab === tab} className={libraryTab === tab ? "active" : ""} onClick={() => setLibraryTab(tab)}>{tab}<span>{tab === "phrases" ? curriculumTotals.phrases : tab === "words" ? curriculumTotals.words : curriculumTotals.patterns}</span></button>)}</div>
-            {libraryTab === "phrases" && <div className="phrase-library">{((libraryResults as typeof phrases | null) ?? phrases).map((item) => <button key={item.id} onClick={() => speakSpanish(item.spanish)}><span><small>RUTA {String(item.unit).padStart(2, "0")} · {item.situation}</small><strong>{item.spanish}</strong></span><p>{item.translation}</p><i>◖))</i></button>)}</div>}
-            {libraryTab === "words" && <div className="word-library">{((libraryResults as Word[] | null) ?? vocabulary).map((item, index) => <button key={`${item.word}-${index}`} onClick={() => speakSpanish(item.word.replace("/a", "a"))}><span><small>RUTA {String(item.unit).padStart(2, "0")}</small><strong>{item.word}</strong><b>{item.note ?? ""}</b></span><p>{item.meaning}</p><i>◖))</i></button>)}</div>}
-            {libraryTab === "patterns" && <div className="grammar-library">{((libraryResults as Pattern[] | null) ?? patterns).map((item) => <article key={`${item.unit}-${item.pattern}`}><span>RUTA {String(item.unit).padStart(2, "0")}</span><h3>{item.pattern}</h3><p>{item.meaning}</p><button onClick={() => speakSpanish(item.example)}>◖)) {item.example}</button><small>{item.translation}</small></article>)}</div>}
-          </section>
-        )}
-
-        {view === "progress" && (
-          <section className="progress-view view-enter">
-            <div className="section-intro compact"><span className="eyebrow">TU RITMO · YOUR PROGRESS</span><h1>Useful Spanish,<br /><em>adding up.</em></h1><p>Coverage shows what the course has introduced. Accuracy comes only from answers you give.</p></div>
-            <div className="stat-cards"><article><span>DÍAS</span><strong>{progress.streak}</strong><p>day rhythm</p></article><article><span>PUNTOS</span><strong>{progress.xp}</strong><p>practice XP</p></article><article><span>PALABRAS</span><strong>{progress.learnedWords.length}</strong><p>words covered</p></article><article><span>SEÑAL</span><strong>{accuracy || "—"}{accuracy ? "%" : ""}</strong><p>answer accuracy</p></article></div>
-            <div className="coverage-panel"><div><span className="eyebrow">COURSE COVERAGE</span><h2>{coursePercent}% of the A1 path cleared.</h2><p>{progress.completedUnits.length} of {courseUnits.length} real-life routes</p></div><div className="coverage-bars"><div><span>Words introduced <b>{progress.learnedWords.length}/{curriculumTotals.words}</b></span><i><em style={{ width: `${Math.min(100, progress.learnedWords.length / curriculumTotals.words * 100)}%` }} /></i></div><div><span>Patterns introduced <b>{progress.learnedPatterns.length}/{curriculumTotals.patterns}</b></span><i><em style={{ width: `${Math.min(100, progress.learnedPatterns.length / curriculumTotals.patterns * 100)}%` }} /></i></div><div><span>Phrases practiced <b>{progress.practicedPhrases.length}/{curriculumTotals.phrases}</b></span><i><em style={{ width: `${Math.min(100, progress.practicedPhrases.length / curriculumTotals.phrases * 100)}%` }} /></i></div></div></div>
-            <div className="progress-bottom">
-              <article className={`cloud-card ${syncStatus}`}><span className="sync-dot" /><div><small>{account.mode === "signed-in" ? "SIGNED-IN PROGRESS" : "DEVICE PROGRESS"}</small><h3>{syncStatus === "synced" ? "Your newest phrase follows you." : syncStatus === "conflict" ? "Two progress copies need a choice." : account.mode === "device" ? "Safe in this browser." : "Checking your saved copy…"}</h3><p>{account.mode === "signed-in" ? `${account.displayName ?? account.email ?? "Your account"} · your private Dilo record` : "The public copy stays on this device. Export a backup or open the private app for account sync."}</p>{account.mode === "device" && <a href={`${SYNCED_APP_URL}/#progress`}>Open synced Dilo →</a>}</div></article>
-              <article className="backup-card"><small>OWN YOUR COPY</small><h3>Backup & restore</h3><p>Dilo exports its own progress file and never touches your other language sites.</p><div><button onClick={exportProgress}>Export</button><button onClick={() => importRef.current?.click()}>Import</button><button className="danger" onClick={() => setShowReset(true)}>Reset</button></div><input ref={importRef} type="file" accept="application/json" onChange={(event) => void importProgress(event)} hidden /></article>
-            </div>
-            {progress.checkpointScores.length > 0 && <div className="history-panel"><span className="eyebrow">CHECKPOINT HISTORY</span><div>{progress.checkpointScores.map((score, index) => <span key={`${score}-${index}`} className={score >= 70 ? "pass" : ""}><strong>{score}%</strong><small>Attempt {index + 1}</small></span>)}</div></div>}
-          </section>
-        )}
-      </main>
-
-      <nav className="main-nav" aria-label="Primary navigation">
-        <button className={view === "today" ? "active" : ""} onClick={() => navigate("today")}><span>HOY</span><small>Today</small></button>
-        <button className={view === "path" ? "active" : ""} onClick={() => navigate("path")}><span>IR</span><small>Path</small></button>
-        <button className={view === "practice" ? "active" : ""} onClick={() => navigate("practice")}><span>DI</span><small>Practice</small></button>
-        <button className={view === "phrasebook" ? "active" : ""} onClick={() => navigate("phrasebook")}><span>ABC</span><small>Words</small></button>
-        <button className={view === "progress" ? "active" : ""} onClick={() => navigate("progress")}><span>+</span><small>Progress</small></button>
-      </nav>
-
-      {!progress.onboarded && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
-          <div className="onboarding-card">
-            <div className="onboarding-sun"><span>di</span></div>
-            <span className="eyebrow">TU PRIMERA FRASE</span>
-            <h2 id="welcome-title">Spanish that leaves<br /><em>the textbook.</em></h2>
-            <p>Dilo starts with a real exchange, then gives you just enough vocabulary and grammar to make it your own. Choose a rhythm, not a deadline.</p>
-            <fieldset><legend>What brings you here?</legend><div>{["Speak with confidence", "Travel with ease", "Build an A1 foundation"].map((item) => <button key={item} className={goal === item ? "active" : ""} onClick={() => setGoal(item)}>{item}</button>)}</div></fieldset>
-            <fieldset><legend>Your daily rhythm</legend><div>{[5, 10, 15].map((minutes) => <button key={minutes} className={dailyGoal === minutes ? "active" : ""} onClick={() => setDailyGoal(minutes)}><strong>{minutes}</strong><span>min</span></button>)}</div></fieldset>
-            <button className="primary-action" onClick={() => setProgress((current) => ({ ...current, onboarded: true, goal, dailyGoal }))}>Say your first hola <span>→</span></button>
-            <small>No streak pressure. Progress saves automatically.</small>
-          </div>
-        </div>
-      )}
-
-      {remoteConflict && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-card"><span className="eyebrow">SYNC PROTECTION</span><h2 id="conflict-title">Two copies were found.</h2><p>Nothing has been overwritten. Keep this device’s {progress.xp} XP or restore the cloud copy with {remoteConflict.progress.xp} XP.</p><div><button onClick={() => resolveConflict("device")}><strong>This device</strong><span>{progress.completedUnits.length} routes · {progress.xp} XP</span></button><button onClick={() => resolveConflict("cloud")}><strong>Cloud copy</strong><span>{remoteConflict.progress.completedUnits.length} routes · {remoteConflict.progress.xp} XP</span></button></div><small>The copy you do not choose is retained as recovery history.</small></div></div>}
-      {showReset && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reset-title"><div className="reset-card"><span>¿?</span><h2 id="reset-title">Reset your whole path?</h2><p>This clears course progress on this device and, when signed in, replaces the cloud copy. Export first if you may want it later.</p><div><button onClick={() => setShowReset(false)}>Keep my progress</button><button className="danger" onClick={resetProgress}>Reset everything</button></div></div></div>}
-      {toast && <div className="toast" role="status">{toast}</div>}
-    </div>
-  );
+    {!progress.onboarded && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><div className="onboarding-card expanded"><div className="onboarding-sun"><span>di</span></div><span className="eyebrow">A1 → C2 · YOUR FIRST LEARNING DAY</span><h2 id="welcome-title">Spanish that leaves<br /><em>the textbook.</em></h2><p>Dilo is a complete learning loop, not a list of quizzes. Every day moves from exposure to retrieval, form, comprehension, sentence building, reading, speaking, and correction.</p><fieldset><legend>What brings you here?</legend><div>{["Speak with confidence", "Travel and connect", "Reach professional fluency"].map((item) => <button key={item} className={goal === item ? "active" : ""} onClick={() => setGoal(item)}>{item}</button>)}</div></fieldset><fieldset><legend>Focused daily rhythm</legend><div>{[10, 20, 30].map((minutes) => <button key={minutes} className={dailyMinutes === minutes ? "active" : ""} onClick={() => setDailyMinutes(minutes)}><strong>{minutes}</strong><span>min</span></button>)}</div></fieldset><fieldset><legend>New lexical chunks per learning day</legend><div>{[5, 8, 10].map((count) => <button key={count} className={dailyNew === count ? "active" : ""} onClick={() => setDailyNew(count)}><strong>{count}</strong><span>new</span></button>)}</div></fieldset><button className="primary-action" onClick={() => setProgress((current) => ensureCurrentPlan({ ...current, onboarded: true, goal, dailyMinutes, dailyNew }))}>Begin at A1 <span>→</span></button><small>Already know some Spanish? Use the checkpoint for a baseline; Dilo keeps the sequence honest.</small></div></div>}
+    {remoteConflict && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="conflict-title"><div className="conflict-card"><span className="eyebrow">SYNC PROTECTION</span><h2 id="conflict-title">Two copies were found.</h2><p>Nothing has been overwritten. Keep this device’s {progress.xp} XP at {progress.selectedLevel}, or restore the cloud copy with {remoteConflict.progress.xp} XP at {remoteConflict.progress.selectedLevel}.</p><div><button onClick={() => resolveConflict("device")}><strong>This device</strong><span>{progress.selectedLevel} · {progress.xp} XP</span></button><button onClick={() => resolveConflict("cloud")}><strong>Cloud copy</strong><span>{remoteConflict.progress.selectedLevel} · {remoteConflict.progress.xp} XP</span></button></div><small>The copy you do not choose is retained as recovery history.</small></div></div>}
+    {showReset && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="reset-title"><div className="reset-card"><span>¿?</span><h2 id="reset-title">Reset the entire A1–C2 path?</h2><p>This clears every level archive, review schedule, correction, and checkpoint. Export first if you may want it later.</p><div><button onClick={() => setShowReset(false)}>Keep my progress</button><button className="danger" onClick={resetProgress}>Reset everything</button></div></div></div>}
+    {toast && <div className="toast" role="status">{toast}</div>}
+  </div>;
 }

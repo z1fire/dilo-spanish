@@ -1,100 +1,46 @@
-# vinext-starter
+# Dilo
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Dilo is a speaking-first Spanish learning app that runs from CEFR A1 through C2. It mirrors the learning discipline of the companion Mandarin app while replacing character and tone work with Spanish-specific conjugation, agreement, pronunciation, rhythm, register, and discourse practice.
 
-## Prerequisites
+## Learning loop
 
-- Node.js `>=22.13.0`
+Every guided learning day follows the same complete loop:
 
-## Quick Start
+1. Cards introduce a small lexical set without scoring it.
+2. Recall requires typed retrieval from meaning or audio.
+3. Grammar teaches one form-meaning system and rebuilds an example.
+4. Listening checks meaning before full dictation.
+5. Build reconstructs the day’s mission line.
+6. Read places that line in a four-turn exchange.
+7. Speak requires all four lines, using browser speech recognition or an explicit manual fallback.
+
+Objective misses enter a correction queue. A correction must be retrieved correctly now and on a later learning day. Unfinished sessions resume at the exact step, missed calendar days do not create a backlog, and one bonus learning day is available after the main session.
+
+## Course shape
+
+- Six levels: A1, A2, B1, B2, C1, C2
+- 72 real-world missions, each revisited across three phases
+- 216 minimum guided sessions before the rotating fluency loops
+- 216 curated lexical chunks and 72 grammar systems
+- Spanish sound and rhythm labs from stable vowels and stress to advanced prosody
+- Forty-question timed checkpoints: 20 listening and 20 reading/usage
+- Five graduation gates: lexical coverage, grammar coverage, missions, clear corrections, and an 80% checkpoint
+
+B2 is labeled the conversational-fluency threshold; C1 is advanced fluency and C2 is mastery. The app explicitly asks learners to add increasing amounts of real conversation and extensive input at every level.
+
+## Releases
+
+- The Sites release uses private account-bound D1 progress sync with optimistic conflict recovery.
+- The GitHub Pages release is repository-path-safe and stores progress on the current device.
+- Both releases include the same curriculum, learning engine, PWA shell, import/export, and progress migration from the original A1 app.
+
+## Development
 
 ```bash
 npm install
 npm run dev
-npm run build
+npm test
+npm run lint
 ```
 
-This starter does not use `wrangler.jsonc`.
-
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
-
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+`npm test` builds both the Sites and GitHub Pages variants and checks the rendered app shell.
