@@ -612,12 +612,45 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
 .coach-heading > span { color: var(--clay-dark); font-size: 8px; font-weight: 800; letter-spacing: .19em; }
 .coach-heading h1 { margin: 12px 0 7px; font: 500 clamp(42px, 7vw, 66px)/.95 Georgia, serif; letter-spacing: -.035em; }
 .coach-heading p { margin: 0; color: var(--ink-soft); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.learning-brief { margin-bottom: 18px; border: 1px solid var(--line); border-left: 5px solid var(--gold); background: #fff1be; display: grid; grid-template-columns: 1fr minmax(190px, 240px); }
+.learning-brief > div { padding: 20px 24px; }
+.learning-brief span { color: var(--clay-dark); font-size: 7px; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }
+.learning-brief h2 { margin: 7px 0 4px; font: 500 25px Georgia, serif; }
+.learning-brief p { margin: 0; max-width: 610px; color: var(--ink-soft); font-size: 9px; line-height: 1.6; }
+.learning-brief aside { border-left: 1px solid rgba(84,68,42,.18); padding: 18px 22px; display: grid; align-content: center; gap: 5px; }
+.learning-brief aside strong { font: 500 18px Georgia, serif; }
+.learning-brief aside small { color: var(--ink-soft); font-size: 7px; line-height: 1.5; }
+.flashcard-stage { width: min(720px, 100%); margin: 0 auto; perspective: 1200px; }
 .flashcard { min-height: 390px; border: 1px solid var(--line); background: var(--paper); padding: 45px; display: grid; place-content: center; justify-items: center; text-align: center; box-shadow: 11px 11px 0 var(--paper-deep); position: relative; }
+.flashcard.front { min-height: 470px; grid-template-rows: 1fr auto; place-content: stretch; padding: 22px; }
+.flashcard.back { min-height: 560px; animation: cardReveal .24s ease both; }
+.flashcard.back > span { color: var(--clay-dark); font-size: 7px; font-weight: 800; letter-spacing: .16em; }
 .flashcard-count { position: absolute; right: 18px; top: 16px; color: var(--ink-soft); font-size: 8px; }
 .flashcard > strong { font: 500 clamp(45px, 8vw, 75px)/1 Georgia, serif; }
 .flashcard > p { margin: 15px 0 5px; color: var(--clay-dark); font: italic 500 24px Georgia, serif; }
 .flashcard > small { max-width: 500px; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
 .flashcard > button:not(.audio-button) { margin-top: 30px; border: 1px solid var(--ink); background: transparent; padding: 12px 18px; cursor: pointer; font-size: 9px; font-weight: 800; }
+.flashcard.front > .card-face-button { width: 100%; margin: 0; border: 0; background: transparent; padding: 45px 18px 10px; display: grid; place-content: center; justify-items: center; gap: 24px; cursor: pointer; }
+.card-face-button > span { color: var(--clay-dark); font-size: 7px; font-weight: 800; letter-spacing: .16em; }
+.card-face-button > strong { font: 500 clamp(52px, 9vw, 82px)/1 Georgia, serif; }
+.card-face-button > small { color: var(--ink-soft); font-size: 8px; }
+.flashcard.front > .card-audio { margin: 6px 0 14px; }
+.card-example { width: min(560px, 100%); margin-top: 22px; border: 1px solid var(--line); background: var(--paper-light); padding: 16px 18px; display: grid; gap: 5px; text-align: left; }
+.card-example > span { color: var(--clay-dark); font-size: 7px; font-weight: 800; letter-spacing: .14em; }
+.card-example > b { font: 500 18px/1.4 Georgia, serif; }
+.card-example > small { color: var(--ink-soft); font-size: 8px; line-height: 1.5; }
+.card-example > .audio-button { justify-self: start; margin-top: 6px; }
+.card-speech-practice { margin-top: 13px; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 7px; }
+.card-speech-practice button { border: 1px solid var(--ink); background: transparent; padding: 10px 13px; cursor: pointer; font-size: 8px; font-weight: 800; }
+.card-speech-practice button:disabled { opacity: .45; }
+.card-speech-practice span { flex-basis: 100%; color: var(--ink-soft); font-size: 8px; text-align: center; }
+.card-pass-complete { min-height: 440px; border: 1px solid var(--line); background: var(--paper); padding: clamp(30px, 7vw, 70px); display: grid; place-content: center; justify-items: center; gap: 13px; text-align: center; box-shadow: 11px 11px 0 var(--paper-deep); }
+.card-pass-complete > span { color: var(--clay-dark); font-size: 7px; font-weight: 800; letter-spacing: .17em; }
+.card-pass-complete h2 { margin: 0; font: 500 clamp(37px, 6vw, 58px) Georgia, serif; }
+.card-pass-complete p { max-width: 610px; margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.65; }
+.card-pass-complete > div { margin-top: 13px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.card-pass-complete > div > button:not(.primary-action) { border: 1px solid var(--ink); background: transparent; padding: 12px 16px; cursor: pointer; font-size: 8px; font-weight: 800; }
+@keyframes cardReveal { from { opacity: 0; transform: rotateY(-4deg) translateY(6px); } to { opacity: 1; transform: none; } }
 .card-audio, .listen-controls { display: flex; gap: 8px; justify-content: center; margin-top: 25px; }
 .audio-button { border: 1px solid var(--line); background: var(--paper-light); padding: 10px 13px; color: var(--blue); cursor: pointer; font-size: 8px; text-transform: uppercase; }
 .audio-button span { margin-right: 7px; font-size: 13px; }
@@ -627,8 +660,24 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
 .recall-card { min-height: 370px; display: grid; align-content: center; text-align: center; }
 .recall-card > span, .tile-builder > span, .dictation > span, .reading-question > span { color: var(--clay-dark); font-size: 8px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .recall-card > h2 { margin: 12px 0 25px; font: 500 42px Georgia, serif; }
-.recall-card .reveal-recall { margin: 24px auto 0; }
-.feedback-box.reveal { border-color: var(--blue); background: #e5ecf8; }
+.recall-instruction { margin: 0 0 18px; color: var(--ink-soft); font-size: 9px; }
+.recall-choice-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; text-align: left; }
+.recall-choice-grid button { min-height: 66px; border: 1px solid var(--line); background: var(--paper-light); padding: 10px 13px; display: grid; grid-template-columns: 29px 1fr; align-items: center; gap: 10px; cursor: pointer; }
+.recall-choice-grid button:hover { border-color: var(--ink); background: #fff; }
+.recall-choice-grid b { width: 27px; height: 27px; border: 1px solid var(--line); border-radius: 50%; display: grid; place-items: center; font-size: 8px; }
+.recall-choice-grid span { color: var(--ink); font: 500 16px/1.35 Georgia, serif; letter-spacing: 0; text-transform: none; }
+.dont-recall { width: fit-content; margin: 17px auto 0; border: 0; background: transparent; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 4px; cursor: pointer; font-size: 8px; }
+.recall-remediation, .recall-confirmation { display: grid; justify-items: center; }
+.recall-remediation > span, .recall-confirmation > span { color: var(--clay-dark); font-size: 7px; font-weight: 800; letter-spacing: .16em; }
+.recall-remediation > h2, .recall-confirmation > h2 { margin: 12px 0 4px; font: 500 clamp(42px, 7vw, 65px)/1 Georgia, serif; }
+.recall-remediation > p, .recall-confirmation > p { margin: 5px 0; color: var(--clay-dark); font: italic 500 22px Georgia, serif; }
+.recall-remediation > small { max-width: 560px; color: var(--ink-soft); font-size: 9px; line-height: 1.5; }
+.recall-remediation .remediation-rule { width: min(560px, 100%); margin-top: 18px; border-left: 4px solid var(--clay); background: #f4dfd7; padding: 12px 15px; color: var(--ink-soft); font: 800 8px/1.5 Arial, sans-serif; }
+.confirmation-controls { margin-top: 18px; display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
+.confirmation-controls button { border: 1px solid var(--ink); background: transparent; padding: 10px 12px; cursor: pointer; font-size: 8px; font-weight: 800; }
+.revealed-support { width: min(560px, 100%); margin-top: 14px; border: 1px solid var(--line); background: var(--paper-light); padding: 13px 15px; color: var(--ink-soft); font-size: 9px; line-height: 1.5; }
+.recall-remediation > .primary-action, .recall-confirmation > .primary-action { margin-top: 22px; }
+.speaking-recall > .primary-action { margin: 10px auto 0; }
 .self-grade { margin-top: 22px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .self-grade > button:not(.primary-action) { min-height: 46px; border: 1px solid var(--ink); background: transparent; padding: 11px 17px; cursor: pointer; font-size: 9px; font-weight: 800; }
 .recall-card label, .feedback-box label { display: grid; gap: 7px; text-align: left; margin-top: 20px; }
@@ -737,11 +786,6 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
 
 /* v3 parity systems */
 .catchup-note { display: block; max-width: 620px; margin-top: 12px; color: var(--olive); font-size: 8px; line-height: 1.5; }
-.recall-grades { margin-top: 22px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
-.recall-grades button { min-height: 58px; border: 1px solid var(--ink); background: transparent; padding: 8px; display: grid; gap: 3px; cursor: pointer; }
-.recall-grades button:hover { background: var(--ink); color: #fff; }
-.recall-grades strong { font: 500 15px Georgia, serif; }
-.recall-grades small { color: var(--ink-soft); font-size: 7px; }
 .recall-summary { min-height: 390px; border: 1px solid var(--line); background: var(--paper); padding: clamp(28px, 6vw, 58px); display: grid; place-content: center; gap: 16px; text-align: center; }
 .recall-summary > strong { font: 500 clamp(30px, 5vw, 48px) Georgia, serif; }
 .recall-summary > p { max-width: 620px; margin: 0 auto; color: var(--ink-soft); font-size: 10px; line-height: 1.6; }
@@ -873,7 +917,12 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
   .step-rail button small { display: none; }
   .coach-content { width: calc(100% - 24px); }
   .coach-panel { padding-top: 32px; }
+  .learning-brief { grid-template-columns: 1fr; }
+  .learning-brief aside { border-top: 1px solid rgba(84,68,42,.18); border-left: 0; }
   .flashcard { min-height: 360px; padding: 30px 20px; }
+  .flashcard.front { min-height: 410px; padding: 18px; }
+  .flashcard.back { min-height: 520px; }
+  .recall-choice-grid { grid-template-columns: 1fr; }
   .recall-card, .listening-stage, .tile-builder, .reading-card, .correction-gate > article { padding: 22px; }
   .reading-card { padding: 0; }
   .speaking-lines { grid-template-columns: 1fr; }
@@ -881,7 +930,7 @@ button.danger:hover { background: var(--clay-dark) !important; color: #fff; }
   .exam-intro > div { width: 100%; grid-template-columns: 1fr; }
   .exam-intro article { min-width: 0; }
   .wrong-review { grid-template-columns: 1fr; }
-  .recall-grades, .mixer-slots { grid-template-columns: repeat(2, 1fr); }
+  .mixer-slots { grid-template-columns: repeat(2, 1fr); }
   .completion-receipt { grid-template-columns: 1fr; }
   .grammar-mixer { width: calc(100% - 24px); margin-top: 55px; }
   .grammar-mixer.compact { width: 100%; }

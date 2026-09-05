@@ -11,6 +11,7 @@ import {
   getArchive,
   queueCorrection,
   recordPlanPosition,
+  recordReviewMiss,
   recordSkill,
   recordWordConfidence,
   resolveCorrection,
@@ -19,7 +20,6 @@ import {
   similarityScore,
   type DailyStep,
   type Progress,
-  type ReviewGrade,
 } from "./spanish-engine";
 import { grammarByLevel, lexiconByLevel, missionsByLevel } from "./spanish-curriculum";
 import { formatDuration, sentenceTokens, speakSpanish, tokensMatch } from "./spanish-ui";
@@ -32,7 +32,7 @@ type Props = {
 
 const stepLabels: Record<DailyStep, { short: string; title: string; note: string }> = {
   cards: { short: "CARDS", title: "Meet today’s language", note: "Preview without scoring" },
-  recall: { short: "RECALL", title: "Pull it from memory", note: "Think or speak before you reveal" },
+  recall: { short: "RECALL", title: "Pull it from memory", note: "Answers stay hidden until you commit" },
   grammar: { short: "GRAMMAR", title: "Notice, then build", note: "Form connected to meaning" },
   listen: { short: "LISTEN", title: "Understand the scene", note: "Meaning before transcript" },
   build: { short: "BUILD", title: "Assemble a real line", note: "Word order and agreement" },
@@ -49,65 +49,114 @@ function StepHeader({ step, kicker }: { step: DailyStep; kicker?: string }) {
   return <div className="coach-heading"><span>{kicker ?? `STEP ${position} OF ${DAILY_STEPS.length}`} · {stepLabels[step].short}</span><h1>{stepLabels[step].title}</h1><p>{stepLabels[step].note}</p></div>;
 }
 
+function completeCardExample(level: Progress["selectedLevel"], word: { spanish: string; english: string }) {
+  const normalize = (value: string) => value.toLocaleLowerCase("es").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[¿?¡!.,;:…“”"«»]/g, " ").replace(/\s+/g, " ").trim();
+  const target = ` ${normalize(word.spanish)} `;
+  const mission = missionsByLevel[level].find((item) => ` ${normalize(item.model)} `.includes(target));
+  if (mission) return { spanish: mission.model, english: mission.translation };
+  const grammar = grammarByLevel[level].find((item) => ` ${normalize(item.example)} `.includes(target));
+  if (grammar) return { spanish: grammar.example, english: grammar.translation };
+  return { spanish: `«${word.spanish.replace("…", "").trim()}»`, english: word.english };
+}
+
+function CardSpeechPractice({ phrase }: { phrase: string }) {
+  const [listening, setListening] = useState(false);
+  const [heard, setHeard] = useState("");
+  const [manual, setManual] = useState(false);
+  const practice = () => {
+    const Constructor = (window as unknown as { SpeechRecognition?: RecognitionConstructor; webkitSpeechRecognition?: RecognitionConstructor }).SpeechRecognition
+      ?? (window as unknown as { webkitSpeechRecognition?: RecognitionConstructor }).webkitSpeechRecognition;
+    if (!Constructor) { setManual(true); return; }
+    const recognition = new Constructor();
+    recognition.lang = "es-ES"; recognition.interimResults = false; recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript ?? "";
+      setHeard(`${transcript} · ${similarityScore(transcript, phrase)}% match`);
+      setListening(false);
+    };
+    recognition.onerror = () => { setListening(false); setManual(true); };
+    recognition.onend = () => setListening(false);
+    setHeard(""); setListening(true); recognition.start();
+  };
+  return <div className="card-speech-practice"><button onClick={() => speakSpanish(phrase)}>◖)) Hear word</button><button disabled={listening} onClick={practice}>{listening ? "Listening…" : "Speak this phrase"}</button>{manual && <span>Say it aloud, then continue.</span>}{heard && <span>Heard: {heard}</span>}</div>;
+}
+
 function CardsStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
-  const words = lexiconByLevel[progress.selectedLevel].filter((item) => (plan.newWordIds.length ? plan.newWordIds : plan.recallWordIds).includes(item.id));
+  const words = lexiconByLevel[progress.selectedLevel].filter((item) => plan.recallWordIds.includes(item.id));
   const [position, setPosition] = useState(() => Math.min(plan.flashcardPosition, Math.max(0, words.length - 1)));
   const [revealed, setRevealed] = useState(false);
+  const [passComplete, setPassComplete] = useState(() => Boolean(words.length && plan.flashcardPosition >= words.length));
   const word = words[position];
-  if (!word) return <div className="empty-step"><StepHeader step="cards" /><h2>No new cards today.</h2><p>Your queue is in maintenance mode, so today starts with recall.</p><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>;
+  if (!word) return <div className="empty-step"><StepHeader step="cards" /><h2>No scheduled cards today.</h2><p>Your queue is clear, so you can continue to recall.</p><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>;
+  const example = completeCardExample(progress.selectedLevel, word);
   const advance = () => {
-    if (position >= words.length - 1) { update((current) => recordPlanPosition(current, "cards", words.length)); done(); return; }
+    if (position >= words.length - 1) {
+      update((current) => recordPlanPosition(current, "cards", words.length));
+      setPassComplete(true); setRevealed(false); return;
+    }
     update((current) => recordPlanPosition(current, "cards", position + 1));
     setPosition((value) => value + 1); setRevealed(false);
   };
-  return <section className="coach-panel"><StepHeader step="cards" /><div className={`flashcard ${revealed ? "revealed" : ""}`}><div className="flashcard-count">{position + 1} / {words.length}</div><strong>{word.spanish}</strong>{revealed ? <><p>{word.english}</p><small>{word.cue}</small><div className="card-audio"><SoundButton text={word.spanish} /><SoundButton text={word.spanish} slow /></div></> : <button onClick={() => setRevealed(true)}>Reveal meaning</button>}</div>{revealed && <button className="primary-action coach-next" onClick={advance}>{position === words.length - 1 ? "Start recall" : "Next card"}<span>→</span></button>}<p className="coach-footnote">Cards introduce. Your recall score starts in the next step.</p></section>;
+  const repeatPass = () => {
+    update((current) => recordPlanPosition(current, "cards", 0));
+    setPosition(0); setRevealed(false); setPassComplete(false);
+  };
+  if (passComplete) return <section className="coach-panel"><StepHeader step="cards" kicker="FLASHCARD PASS COMPLETE" /><div className="card-pass-complete"><span>STUDY PASS FINISHED</span><h2>Flashcard pass complete.</h2><p>You can repeat the scheduled set as many times as you want. Extra passes never change recall progress, return timing, XP, or today’s completion.</p><div><button onClick={repeatPass}>↻ Review flashcards again</button><button className="primary-action" onClick={done}>Start recall test <span>→</span></button></div></div></section>;
+  return <section className="coach-panel"><StepHeader step="cards" /><div className="learning-brief"><div><span>FULL-CARD STUDY · {position + 1}/{words.length}</span><h2>Learn first. Test second.</h2><p>Start with Spanish, then reveal the meaning, usage cue, example, audio, and speaking practice. Nothing here is scored.</p></div><aside><span>UP NEXT</span><strong>Recall test</strong><small>Same scheduled words · answers hidden</small></aside></div><div className="flashcard-stage">{!revealed ? <article className="flashcard front"><div className="flashcard-count">{position + 1} / {words.length}</div><button className="card-face-button" onClick={() => setRevealed(true)}><span>FLASHCARD FRONT · LOOK & LISTEN</span><strong>{word.spanish}</strong><small>Tap to reveal the complete card ↗</small></button><div className="card-audio"><SoundButton text={word.spanish} /></div></article> : <article className="flashcard back"><div className="flashcard-count">{position + 1} / {words.length}</div><span>COMPLETE FLASHCARD · LISTEN & SAY IT</span><strong>{word.spanish}</strong><p>{word.english}</p><small>{word.cue}</small><div className="card-example"><span>EXAMPLE IN CONTEXT</span><b>{example.spanish}</b><small>{example.english}</small></div><div className="card-audio"><SoundButton text={word.spanish} /><SoundButton text={example.spanish} slow /></div><CardSpeechPractice phrase={word.spanish} /><button className="primary-action" onClick={advance}>{position === words.length - 1 ? "Finish this flashcard pass" : "Next flashcard"}<span>→</span></button></article>}</div></section>;
 }
+
+type RecallMode = "meaning" | "audio" | "reading";
 
 function RecallStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
   const originalWords = lexiconByLevel[progress.selectedLevel].filter((item) => plan.recallWordIds.includes(item.id));
   const [queue, setQueue] = useState(() => originalWords);
   const [position, setPosition] = useState(() => Math.min(plan.recallPosition, Math.max(0, originalWords.length - 1)));
-  const [feedback, setFeedback] = useState<"question" | "revealed" | "graded" | "summary">("question");
+  const [feedback, setFeedback] = useState<"question" | "missed" | "correct" | "summary">(() => plan.recallPosition >= originalWords.length ? "summary" : "question");
   const [missedIds, setMissedIds] = useState<string[]>([]);
   const [round, setRound] = useState<"main" | "missed" | "shuffle" | "speak">("main");
-  const [lastGrade, setLastGrade] = useState<ReviewGrade | null>(null);
-  const words = queue;
-  const word = words[position];
+  const [showCue, setShowCue] = useState(false);
+  const [showExample, setShowExample] = useState(false);
+  const [showSpeaking, setShowSpeaking] = useState(false);
+  const word = queue[position];
   if (!word) return <div className="empty-step"><StepHeader step="recall" /><p>No recall items are due.</p><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>;
-  const mode = round === "speak" ? "speaking" : position % 2 ? "audio" : "meaning";
-  const submit = (grade: ReviewGrade) => {
-    const correct = grade !== "again";
+  const example = completeCardExample(progress.selectedLevel, word);
+  const review = getArchive(progress).reviews[word.id];
+  const mode: RecallMode = (["meaning", "audio", "reading"] as const)[(position + (review?.repetitions ?? 0)) % 3];
+  const answer = mode === "meaning" ? word.spanish : word.english;
+  const optionPool = mode === "meaning" ? lexiconByLevel[progress.selectedLevel].map((item) => item.spanish) : lexiconByLevel[progress.selectedLevel].map((item) => item.english);
+  const options = choices(answer, optionPool, plan.learningDay * 43 + position * 17 + (review?.repetitions ?? 0));
+  const modeLabel = mode === "meaning" ? "MEANING → SPANISH" : mode === "audio" ? "AUDIO → MEANING" : "SPANISH → MEANING";
+  const nextInterval = Math.max(1, (review?.interval ?? 0) + 1);
+  const resetSupport = () => { setShowCue(false); setShowExample(false); setShowSpeaking(false); };
+  const miss = () => {
     if (round === "main") {
-      update((current) => {
-        let next = recordSkill(current, "vocabulary", correct);
-        next = recordWordConfidence(next, word.id, correct);
-        next = scheduleReview(next, word.id, grade);
-        if (!correct) next = queueCorrection(next, { id: `word:${word.id}`, skill: "vocabulary", prompt: word.english, answer: word.spanish, choices: choices(word.spanish, lexiconByLevel[current.selectedLevel].map((item) => item.spanish), position + 19), explanation: word.cue, speech: word.spanish });
-        return next;
-      });
-      if (!correct) setMissedIds((current) => Array.from(new Set([...current, word.id])));
+      update((current) => recordReviewMiss(recordWordConfidence(recordSkill(current, "vocabulary", false), word.id, false), word.id));
+      setMissedIds((current) => Array.from(new Set([...current, word.id])));
     }
-    setLastGrade(grade);
-    setFeedback("graded");
+    resetSupport(); setFeedback("missed");
+  };
+  const chooseAnswer = (option: string) => {
+    if (option !== answer) { miss(); return; }
+    if (round === "main") update((current) => recordWordConfidence(recordSkill(current, "vocabulary", true), word.id, true));
+    resetSupport(); setFeedback("correct");
   };
   const advance = () => {
-    if (position >= words.length - 1) {
-      if (round === "main") update((current) => recordPlanPosition(current, "recall", originalWords.length));
-      setFeedback("summary");
-      return;
+    if (round === "main") {
+      update((current) => recordPlanPosition(scheduleReview(current, word.id, true), "recall", Math.min(originalWords.length, position + 1)));
     }
-    if (round === "main") update((current) => recordPlanPosition(current, "recall", position + 1));
-    setPosition((value) => value + 1); setFeedback("question");
+    if (position >= queue.length - 1) { setFeedback("summary"); return; }
+    setPosition((value) => value + 1); resetSupport(); setFeedback("question");
   };
   const startRound = (nextRound: "missed" | "shuffle" | "speak") => {
-    const pool = nextRound === "missed" ? originalWords.filter((item) => missedIds.includes(item.id)) : seededShuffle(originalWords, Date.now());
-    if (!pool.length) { done(); return; }
-    setQueue(pool); setRound(nextRound); setPosition(0); setFeedback("question"); setLastGrade(null);
+    const pool = nextRound === "missed" ? originalWords.filter((item) => missedIds.includes(item.id)) : seededShuffle(originalWords, plan.learningDay + Date.now());
+    if (!pool.length) return;
+    setQueue(pool); setRound(nextRound); setPosition(0); resetSupport(); setFeedback("question");
   };
-  if (feedback === "summary") return <section className="coach-panel"><StepHeader step="recall" kicker="RECALL ROUND COMPLETE" /><div className="recall-summary"><strong>{missedIds.length ? `${missedIds.length} item${missedIds.length === 1 ? "" : "s"} need another look.` : "Every item was retrieved."}</strong><p>Optional repeats do not move the review schedule or add XP. They are here for clean retrieval, not score farming.</p><div>{Boolean(missedIds.length) && <button onClick={() => startRound("missed")}>Retest missed only</button>}<button onClick={() => startRound("shuffle")}>Repeat shuffled</button><button onClick={() => startRound("speak")}>Speaking-only pass</button><button className="primary-action" onClick={done}>Continue to grammar <span>→</span></button></div></div></section>;
-  return <section className="coach-panel"><StepHeader step="recall" kicker={`${mode.toUpperCase()} RECALL · ${position + 1}/${words.length}${round === "main" ? "" : " · OPTIONAL"}`} /><div className="recall-card">{mode === "audio" ? <><span>Listen without looking</span><button className="listen-orb" onClick={() => speakSpanish(word.spanish)} aria-label="Play Spanish prompt">◖))</button></> : <><span>{mode === "speaking" ? "Say the Spanish aloud before revealing" : "Say this in Spanish before revealing"}</span><h2>{word.english}</h2></>}{feedback === "question" && <button className="primary-action reveal-recall" onClick={() => setFeedback("revealed")}>Reveal answer <span>→</span></button>}{feedback === "revealed" && <div className="feedback-box reveal"><span>COMPARE WITH YOUR RECALL</span><h2>{word.spanish}</h2><p>{word.english} · {word.cue}</p><SoundButton text={word.spanish} /><div className="recall-grades"><button onClick={() => submit("again")}><strong>Again</strong><small>missed</small></button><button onClick={() => submit("hard")}><strong>Hard</strong><small>1 day</small></button><button onClick={() => submit("good")}><strong>Good</strong><small>growing gap</small></button><button onClick={() => submit("easy")}><strong>Easy</strong><small>long gap</small></button></div></div>}{feedback === "graded" && <div className={`feedback-box ${lastGrade === "again" ? "remediation" : "correct"}`}><span>{lastGrade === "again" ? "ADDED TO CORRECTIONS" : `${lastGrade?.toUpperCase()} · SCHEDULED`}</span><h2>{word.spanish}</h2><p>{lastGrade === "again" ? "Listen and say the complete answer aloud once before continuing." : "You chose the next spacing based on the quality of recall."}</p><SoundButton text={word.spanish} /><button className="primary-action" onClick={advance}>Continue <span>→</span></button></div>}</div></section>;
+  if (feedback === "summary") return <section className="coach-panel"><StepHeader step="recall" kicker={round === "main" ? "TODAY’S RECALL TEST COMPLETE" : "OPTIONAL RECALL ROUND COMPLETE"} /><div className="recall-summary"><strong>{round === "main" ? "Today’s recall test is complete." : "Optional recall round complete."}</strong><p>{round === "main" ? "Every scheduled word was retrieved successfully and its next automatic return slot is set. Every miss entered the correction-and-retry loop before the card could advance." : "Optional rounds do not change the schedule, XP, or today’s progress."}</p><div>{Boolean(missedIds.length) && <button onClick={() => startRound("missed")}>Retest missed words</button>}<button onClick={() => startRound("speak")}>Speaking-only round</button><button onClick={() => startRound("shuffle")}>Retry recall test</button><button className="primary-action" onClick={done}>Continue to grammar <span>→</span></button></div></div></section>;
+  if (round === "speak") return <section className="coach-panel"><StepHeader step="recall" kicker={`SPEAKING-ONLY ROUND · ${position + 1}/${queue.length} · OPTIONAL`} /><div className="learning-brief"><div><span>UNSCORED SPEAKING PASS</span><h2>Bring the word into your voice.</h2><p>Recall the Spanish aloud, then uncover it and compare. This pass never changes the automatic schedule.</p></div></div><article className="recall-card speaking-recall"><span>SAY THIS IN SPANISH</span><h2>{word.english}</h2>{feedback === "question" ? <button className="primary-action" onClick={() => setFeedback("correct")}>Show Spanish <span>→</span></button> : <div className="recall-confirmation"><span>COMPARE & SAY IT AGAIN</span><h2>{word.spanish}</h2><p>{word.english}</p><CardSpeechPractice phrase={word.spanish} /><button className="primary-action" onClick={advance}>Continue to next card <span>→</span></button></div>}</article></section>;
+  return <section className="coach-panel"><StepHeader step="recall" kicker={`AUTOMATIC RECALL CADENCE · ${position + 1}/${queue.length}${round === "main" ? "" : " · OPTIONAL"}`} /><div className="learning-brief recall-brief"><div><span>{modeLabel}</span><h2>Retrieve it without the card.</h2><p>Choose from memory. A miss reveals the complete answer and must be retried before this card can advance.</p></div><aside><span>NEXT AUTOMATIC RETURN</span><strong>{nextInterval} learning day{nextInterval === 1 ? "" : "s"}</strong><small>Dilo sets the cadence after successful retrieval.</small></aside></div><article className="recall-card">{feedback === "question" && <>{mode === "audio" ? <><span>LISTEN · ANSWER HIDDEN</span><button className="listen-orb" onClick={() => speakSpanish(word.spanish)} aria-label="Play hidden Spanish prompt">◖))</button><p className="recall-instruction">Listen, then choose the meaning.</p></> : <><span>{mode === "meaning" ? "CHOOSE THE SPANISH YOU REMEMBER" : "CHOOSE THE MEANING"}</span><h2>{mode === "meaning" ? word.english : word.spanish}</h2></>}<div className="recall-choice-grid">{options.map((option, index) => <button key={option} onClick={() => chooseAnswer(option)}><b>{String.fromCharCode(65 + index)}</b><span>{option}</span></button>)}</div><button className="dont-recall" onClick={miss}>I don’t recall</button></>}{feedback === "missed" && <div className="recall-remediation"><span>MISSED · STUDY THE COMPLETE ANSWER</span><h2>{word.spanish}</h2><p>{word.english}</p><small>{word.cue}</small><div className="card-example"><span>EXAMPLE IN CONTEXT</span><b>{example.spanish}</b><small>{example.english}</small></div><div className="card-audio"><SoundButton text={word.spanish} /><SoundButton text={example.spanish} slow /></div><CardSpeechPractice phrase={word.spanish} /><p className="remediation-rule">This card cannot advance yet. Hide the answer and retrieve it again.</p><button className="primary-action" onClick={() => { resetSupport(); setFeedback("question"); }}>Hide answer & retry <span>→</span></button></div>}{feedback === "correct" && <div className="recall-confirmation"><span>CORRECT · QUICK CONFIRMATION</span><h2>{word.spanish}</h2><p>{word.english}</p><div className="confirmation-controls"><button onClick={() => speakSpanish(word.spanish)}>◖)) Hear word</button><button onClick={() => setShowSpeaking((value) => !value)}>Practice speaking</button><button onClick={() => setShowExample((value) => !value)}>{showExample ? "Hide example" : "See example"}</button><button onClick={() => setShowCue((value) => !value)}>{showCue ? "Hide usage cue" : "Show usage cue"}</button></div>{showCue && <small className="revealed-support">{word.cue}</small>}{showExample && <div className="card-example"><span>EXAMPLE IN CONTEXT</span><b>{example.spanish}</b><small>{example.english}</small><SoundButton text={example.spanish} /></div>}{showSpeaking && <CardSpeechPractice phrase={word.spanish} />}<button className="primary-action" onClick={advance}>Continue to next card <span>→</span></button></div>}</article></section>;
 }
 
 function GrammarStep({ progress, update, done }: Props & { done: () => void }) {

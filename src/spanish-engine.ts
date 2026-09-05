@@ -8,7 +8,6 @@ import {
 export const DAILY_STEPS = ["cards", "recall", "grammar", "listen", "build", "read", "speak"] as const;
 export type DailyStep = typeof DAILY_STEPS[number];
 export type SkillArea = "vocabulary" | "grammar" | "listening" | "reading" | "sentence" | "speaking" | "pronunciation";
-export type ReviewGrade = "again" | "hard" | "good" | "easy";
 
 export type ReviewState = {
   dueDay: number;
@@ -174,7 +173,7 @@ function normalizeReviewMap(value: unknown): Record<string, ReviewState> {
   if (!value || typeof value !== "object") return {};
   return Object.fromEntries(Object.entries(value as Record<string, Partial<ReviewState>>).map(([id, state]) => [id, {
     dueDay: Math.max(0, finite(state.dueDay)),
-    interval: Math.max(1, finite(state.interval, 1)),
+    interval: Math.max(0, finite(state.interval)),
     repetitions: Math.max(0, finite(state.repetitions)),
     lapses: Math.max(0, finite(state.lapses)),
   }]));
@@ -461,21 +460,33 @@ export function recordPronunciation(progress: Progress, id: string, correct: boo
   return recordSkill({ ...progress, pronunciationDone: done }, "pronunciation", correct);
 }
 
-export function scheduleReview(progress: Progress, id: string, grade: ReviewGrade | boolean, grammar = false): Progress {
+export function recordReviewMiss(progress: Progress, id: string, grammar = false): Progress {
   const level = progress.selectedLevel;
   const archive = getArchive(progress, level);
   const key = grammar ? "grammarReviews" : "reviews";
   const map = archive[key];
-  const previous = map[id] ?? { dueDay: archive.learningDay, interval: 1, repetitions: 0, lapses: 0 };
-  const resolved: ReviewGrade = typeof grade === "boolean" ? (grade ? "good" : "again") : grade;
-  const factors: Record<ReviewGrade, number> = { again: 0, hard: 1.2, good: 2.2, easy: 3.2 };
-  const initial: Record<ReviewGrade, number> = { again: 0, hard: 1, good: 3, easy: 7 };
-  const interval = resolved === "again" ? 0 : Math.max(initial[resolved], Math.round(previous.interval * factors[resolved]));
+  const previous = map[id] ?? { dueDay: archive.learningDay, interval: 0, repetitions: 0, lapses: 0 };
+  const state: ReviewState = {
+    ...previous,
+    dueDay: archive.learningDay,
+    lapses: previous.lapses + 1,
+  };
+  return { ...progress, archives: { ...progress.archives, [level]: { ...archive, [key]: { ...map, [id]: state } } } };
+}
+
+export function scheduleReview(progress: Progress, id: string, correct: boolean, grammar = false): Progress {
+  if (!correct) return recordReviewMiss(progress, id, grammar);
+  const level = progress.selectedLevel;
+  const archive = getArchive(progress, level);
+  const key = grammar ? "grammarReviews" : "reviews";
+  const map = archive[key];
+  const previous = map[id] ?? { dueDay: archive.learningDay, interval: 0, repetitions: 0, lapses: 0 };
+  const interval = Math.max(1, previous.interval + 1);
   const state: ReviewState = {
     dueDay: archive.learningDay + interval,
-    interval: Math.max(1, interval),
-    repetitions: resolved === "again" ? 0 : previous.repetitions + 1,
-    lapses: previous.lapses + (resolved === "again" ? 1 : 0),
+    interval,
+    repetitions: previous.repetitions + 1,
+    lapses: previous.lapses,
   };
   return { ...progress, archives: { ...progress.archives, [level]: { ...archive, [key]: { ...map, [id]: state } } } };
 }
