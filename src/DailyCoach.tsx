@@ -202,40 +202,53 @@ function GrammarStep({ progress, update, done, openGrammarLibrary }: Props & { d
 function ListenStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
   const mission = missionsByLevel[progress.selectedLevel][plan.missionIndex];
-  const pool = missionsByLevel[progress.selectedLevel];
-  const [phase, setPhase] = useState<"meaning" | "gap" | "done">("meaning");
-  const [meaning, setMeaning] = useState("");
-  const [gapAnswer, setGapAnswer] = useState("");
-  const [message, setMessage] = useState("");
-  const meaningChoices = choices(mission.translation, pool.map((item) => item.translation), plan.learningDay + 31);
+  const missionPool = missionsByLevel[progress.selectedLevel];
+  const [meaningResult, setMeaningResult] = useState<"" | "wrong" | "correct">("");
+  const [gapResult, setGapResult] = useState<"" | "wrong" | "correct">("");
+  const [optionalPosition, setOptionalPosition] = useState(0);
+  const [optionalResult, setOptionalResult] = useState<"" | "wrong" | "correct">("");
+  const optionalItems = useMemo(() => seededShuffle([
+    ...missionPool.map((item) => ({ id: item.id, source: item.model, meaning: item.translation, note: item.situation })),
+    ...lexiconByLevel[progress.selectedLevel].map((item) => ({ id: item.id, source: item.spanish, meaning: item.english, note: item.cue })),
+  ], plan.learningDay + 509).slice(0, 20), [missionPool, plan.learningDay, progress.selectedLevel]);
+  const optionalItem = optionalItems[optionalPosition];
+  const meaningChoices = choices(mission.translation, missionPool.map((item) => item.translation), plan.learningDay + 31);
   const modelTokens = sentenceTokens(mission.model);
   const gapLength = Math.min(3, Math.max(1, Math.floor(modelTokens.length / 3)));
   const answerSegment = modelTokens.slice(-gapLength).join(" ");
   const maskedLine = `${modelTokens.slice(0, -gapLength).join(" ")} _____`;
-  const segmentPool = pool.map((item) => sentenceTokens(item.model).slice(-gapLength).join(" "));
+  const segmentPool = missionPool.map((item) => sentenceTokens(item.model).slice(-gapLength).join(" "));
   const gapChoices = choices(answerSegment, segmentPool, plan.learningDay + 87);
+  const optionalChoices = choices(optionalItem.meaning, optionalItems.map((item) => item.meaning), plan.learningDay * 19 + optionalPosition);
   const chooseMeaning = (option: string) => {
     const correct = option === mission.translation;
-    setMeaning(option);
+    setMeaningResult(correct ? "correct" : "wrong");
     update((current) => {
       let next = recordSkill(current, "listening", correct);
       if (!correct) next = queueCorrection(next, { id: `listen:${mission.id}`, skill: "listening", prompt: "What did you hear?", answer: mission.translation, choices: meaningChoices, explanation: mission.model, speech: mission.model });
       return next;
     });
   };
-  const toGap = () => { setPhase("gap"); setMessage(""); };
   const checkGap = (option: string) => {
     const correct = option === answerSegment;
-    setGapAnswer(option);
-    setMessage(correct ? "The sounds and sentence ending line up." : `Complete line: ${mission.model}`);
+    setGapResult(correct ? "correct" : "wrong");
     update((current) => {
       let next = recordSkill(current, "listening", correct);
       if (!correct) next = queueCorrection(next, { id: `gap:${mission.id}`, skill: "listening", prompt: maskedLine, answer: answerSegment, choices: gapChoices, explanation: `Complete line: ${mission.model}`, speech: mission.model });
       return next;
     });
-    setPhase("done");
   };
-  return <section className="coach-panel"><StepHeader step="listen" kicker={`${mission.domain.toUpperCase()} · ${mission.title}`} /><div className="listening-stage"><p>{mission.situation}</p><div className="listen-controls"><button className="listen-orb" onClick={() => speakSpanish(mission.model)} aria-label="Play normal audio">◖))</button><button onClick={() => speakSpanish(mission.model, .62)}>Slow replay</button></div>{phase === "meaning" && <><h2>What does the speaker mean?</h2><div className="choice-list">{meaningChoices.map((option) => <button key={option} disabled={Boolean(meaning)} className={meaning ? option === mission.translation ? "correct" : option === meaning ? "wrong" : "muted" : ""} onClick={() => chooseMeaning(option)}>{option}</button>)}</div>{meaning && <button className="primary-action coach-next" onClick={toGap}>Continue to missing phrase <span>→</span></button>}</>}{phase !== "meaning" && <div className="dictation"><span>Choose the missing Spanish words</span><h3 className="masked-line">{maskedLine}</h3><div className="choice-list">{gapChoices.map((option) => <button key={option} disabled={Boolean(gapAnswer)} className={gapAnswer ? option === answerSegment ? "correct" : option === gapAnswer ? "wrong" : "muted" : ""} onClick={() => checkGap(option)}>{option}</button>)}</div>{phase === "done" && <div className="feedback-box"><strong>{message}</strong><p>{mission.model}</p><small>{mission.translation}</small><SoundButton text={mission.model} /><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>}</div>}</div></section>;
+  const answerOptional = (option: string) => {
+    const correct = option === optionalItem.meaning;
+    setOptionalResult(correct ? "correct" : "wrong");
+    update((current) => {
+      let next = recordSkill(current, "listening", correct);
+      if (!correct) next = queueCorrection(next, { id: `listening-bank:${progress.selectedLevel}:${optionalItem.id}`, skill: "listening", prompt: "Listen again and choose the meaning.", answer: optionalItem.meaning, choices: optionalChoices, explanation: `${optionalItem.source} means ${optionalItem.meaning}. ${optionalItem.note}`, speech: optionalItem.source });
+      return next;
+    });
+  };
+  const nextOptional = () => { setOptionalPosition((value) => (value + 1) % optionalItems.length); setOptionalResult(""); };
+  return <section className="coach-panel"><StepHeader step="listen" kicker={`${mission.domain.toUpperCase()} · ${mission.title}`} /><div className="required-practice-wrap"><div className="listening-lab mission-listening"><div className="listening-instructions"><span>LISTENING LADDER · STEP 1 / 2</span><h2>Understand it before you read it.</h2><p>Play the real-life mission line and choose its meaning. The Spanish transcript stays hidden until you catch the message.</p><button className="big-listen-button" onClick={() => speakSpanish(mission.model)}><span>◖))</span> Play mission line</button><button className="slow-listen-link" onClick={() => speakSpanish(mission.model, .62)}>Play slower</button></div><div className="listening-answer-stack">{meaningChoices.map((option, index) => <button key={option} onClick={() => chooseMeaning(option)} disabled={meaningResult === "correct"}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}{meaningResult && <div className={`listening-result-note ${meaningResult}`}>{meaningResult === "correct" ? `Correct — ${mission.model}` : "Not yet. Replay the phrase and listen for the mission words."}</div>}</div></div>{meaningResult === "correct" && <div className="dictation-lab"><div><span>LISTENING LADDER · STEP 2 / 2</span><h2>Catch the missing Spanish.</h2><p>Replay the full line, then select the piece hidden from the transcript.</p><button className="big-listen-button" onClick={() => speakSpanish(mission.model)}><span>◖))</span> Replay without reading</button></div><div><strong>{maskedLine}</strong><div className="dictation-options">{gapChoices.map((option) => <button key={option} onClick={() => checkGap(option)} disabled={gapResult === "correct"}>{option}</button>)}</div>{gapResult && <div className={`listening-result-note ${gapResult}`}>{gapResult === "correct" ? "Correct · you caught the missing Spanish." : "Not yet · replay the line and listen around the blank."}{gapResult === "correct" && <button onClick={done}>Continue to sentence building →</button>}</div>}</div></div>}<details className="extra-practice"><summary>Extra listening reps <span>20-question practice bank</span></summary><div className="listening-lab optional-listening"><div className="listening-instructions"><span>OPTIONAL LISTENING · {optionalPosition + 1}/{optionalItems.length}</span><h2>Keep training your ear.</h2><p>This practice bank awards extra practice credit without changing today’s required mission.</p><button className="big-listen-button" onClick={() => speakSpanish(optionalItem.source)}><span>◖))</span> Play Spanish</button><button className="slow-listen-link" onClick={() => speakSpanish(optionalItem.source, .62)}>Play slower</button></div><div className="listening-answer-stack">{optionalChoices.map((option, index) => <button key={option} onClick={() => answerOptional(option)} disabled={optionalResult === "correct"}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}{optionalResult && <div className={`listening-result-note ${optionalResult}`}>{optionalResult === "correct" ? `Correct — ${optionalItem.source}` : "Not yet. Replay and listen for the key words."}{optionalResult === "correct" && <button onClick={nextOptional}>Next →</button>}</div>}</div></div></details></div></section>;
 }
 
 function BuildStep({ progress, update, done }: Props & { done: () => void }) {

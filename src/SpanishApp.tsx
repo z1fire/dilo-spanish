@@ -55,7 +55,7 @@ const PREFERENCES_KEY = "dilo:spanish:preferences:v3";
 const V2_PREFERENCES_KEY = "dilo:spanish:preferences:v2";
 const RECOVERY_KEY = "dilo:spanish:recovery:v3";
 const SYNCED_APP_URL = "https://dilo-spanish-a1.z1ifre.chatgpt.site";
-const APP_VERSION = "3.2.0";
+const APP_VERSION = "3.3.0";
 
 function CorrectionLab({ progress, update, close }: { progress: Progress; update: (recipe: (current: Progress) => Progress) => void; close: () => void }) {
   const [answer, setAnswer] = useState("");

@@ -53,7 +53,7 @@ test("builds a repository-path-safe GitHub Pages companion", async () => {
   assert.match(html, /https:\/\/z1fire\.github\.io\/dilo-spanish\//);
   assert.match(manifest, /"start_url": "\.\/#today"/);
   assert.match(manifest, /"scope": "\.\/"/);
-  assert.match(serviceWorker, /dilo-pages-v6/);
+  assert.match(serviceWorker, /dilo-pages-v7/);
   assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(appSource, /https:\/\/dilo-spanish-a1\.z1ifre\.chatgpt\.site/);
 });
@@ -116,7 +116,14 @@ test("ships the complete A1–C2 learning engine", async () => {
   assert.match(mixerUi, /Tap the scrambled pieces below to build the sentence/);
   assert.doesNotMatch(mixerUi, /Needs practice|I can use the pattern/);
   assert.match(mixerData, /linked verb|agreement|subjunctive/i);
-  assert.match(coach, /Choose the missing Spanish words/);
+  assert.match(coach, /LISTENING LADDER · STEP 1 \/ 2/);
+  assert.match(coach, /The Spanish transcript stays hidden until you catch the message/);
+  assert.match(coach, /LISTENING LADDER · STEP 2 \/ 2/);
+  assert.match(coach, /Catch the missing Spanish/);
+  assert.match(coach, /20-question practice bank/);
+  assert.match(coach, /meaningResult === "correct"/);
+  assert.match(coach, /gapResult === "correct"/);
+  assert.doesNotMatch(coach, /Continue to missing phrase|setPhase\("done"\)/);
   assert.match(labs, /Twenty listening items and twenty reading\/usage items/);
   assert.match(labs, /move forward and back/);
   assert.match(labs, /EXACT DAY REPLAY/);
