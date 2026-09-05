@@ -302,20 +302,27 @@ function ReadStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
   const mission = missionsByLevel[progress.selectedLevel][plan.missionIndex];
   const pool = missionsByLevel[progress.selectedLevel];
-  const [support, setSupport] = useState(false);
-  const [answer, setAnswer] = useState("");
-  const options = choices(mission.canDo, pool.map((item) => item.canDo), plan.learningDay + 141);
-  const lines = [mission.opener, mission.model, mission.followUp, mission.closing];
+  const support = plan.phase === 0
+    ? { spanish: "De acuerdo.", translation: "Okay." }
+    : plan.phase === 1
+      ? { spanish: "De acuerdo, gracias.", translation: "Okay, thank you." }
+      : { spanish: "Entendido, muchas gracias.", translation: "Understood, thank you very much." };
+  const lines = [
+    { speaker: "A", spanish: mission.model, translation: mission.translation },
+    { speaker: "B", ...support },
+  ];
+  const options = choices(mission.translation, pool.map((item) => item.translation), plan.learningDay + plan.phase + 141);
+  const [result, setResult] = useState<"" | "correct" | "wrong">("");
   const choose = (option: string) => {
-    const correct = option === mission.canDo;
-    setAnswer(option);
+    const correct = option === mission.translation;
+    setResult(correct ? "correct" : "wrong");
     update((current) => {
       let next = recordSkill(current, "reading", correct);
-      if (!correct) next = queueCorrection(next, { id: `read:${mission.id}`, skill: "reading", prompt: mission.situation, answer: mission.canDo, choices: options, explanation: mission.translation });
+      if (!correct) next = queueCorrection(next, { id: `read:${mission.id}:${plan.phase}`, skill: "reading", prompt: lines.map((line) => line.spanish).join(" "), answer: mission.translation, choices: options, explanation: `${mission.model} means ${mission.translation}`, speech: mission.model });
       return next;
     });
   };
-  return <section className="coach-panel"><StepHeader step="read" kicker={`${progress.selectedLevel} GRADED READING`} /><article className="reading-card"><div className="reading-title"><div><span>{mission.domain}</span><h2>{mission.title}</h2></div><button onClick={() => setSupport((value) => !value)}>{support ? "Hide help" : "Show help"}</button></div><div className="reading-lines">{lines.map((line, index) => <button key={line} onClick={() => speakSpanish(line)}><b>{index % 2 ? "TÚ" : "A"}</b><span><strong>{line}</strong>{support && <small>{index === 1 ? mission.translation : index === 0 ? mission.situation : index === 2 ? "The other speaker continues the exchange." : "The learner closes the exchange."}</small>}</span><i>◖))</i></button>)}</div><div className="reading-question"><span>COMPREHENSION</span><h3>What does the learner successfully do?</h3><div className="choice-list">{options.map((option) => <button key={option} disabled={Boolean(answer)} className={answer ? option === mission.canDo ? "correct" : option === answer ? "wrong" : "muted" : ""} onClick={() => choose(option)}>{option}</button>)}</div>{answer && <button className="primary-action" onClick={done}>Continue <span>→</span></button>}</div></article></section>;
+  return <section className="coach-panel"><StepHeader step="read" kicker={`${progress.selectedLevel} GRADED READING`} /><div className="graded-reader"><div className="reader-intro"><span>GRADED READING · KNOWN MISSION LANGUAGE</span><h2>{mission.title} · mini dialogue</h2><p>Read the exchange first without translation. Tap a line only when you need support.</p></div><div className="reader-page">{lines.map((line, index) => <details key={`${line.speaker}:${line.spanish}`}><summary><span>{line.speaker}</span><strong lang="es">{line.spanish}</strong><button onClick={(event) => { event.preventDefault(); speakSpanish(line.spanish); }} aria-label={`Play line ${index + 1}`}>◖))</button></summary><p><em>{line.translation}</em></p></details>)}<div className="reader-question"><strong>What is speaker A communicating?</strong>{options.map((option) => <button key={option} onClick={() => choose(option)} disabled={result === "correct"}>{option}</button>)}{result && <div className={`reader-result ${result}`}><span>{result === "correct" ? "Correct · you understood the exchange in context." : "Not yet · reread speaker A and use the surrounding reply."}</span>{result === "correct" && <button onClick={done}>Continue to speaking <span>→</span></button>}</div>}</div></div></div></section>;
 }
 
 type RecognitionLike = {
