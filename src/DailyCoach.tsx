@@ -254,21 +254,48 @@ function ListenStep({ progress, update, done }: Props & { done: () => void }) {
 function BuildStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
   const mission = missionsByLevel[progress.selectedLevel][plan.missionIndex];
-  const tiles = useMemo(() => seededShuffle(sentenceTokens(mission.model).map((text, index) => ({ text, key: `${index}:${text}` })), plan.learningDay + 211), [mission.model, plan.learningDay]);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [result, setResult] = useState<"" | "correct" | "wrong">("");
-  const selectedSet = new Set(selected);
-  const built = selected.map((key) => tiles.find((tile) => tile.key === key)!.text);
-  const check = () => {
-    const correct = tokensMatch(built, mission.model);
-    setResult(correct ? "correct" : "wrong");
+  const requiredTiles = useMemo(() => seededShuffle(sentenceTokens(mission.model).map((text, index) => ({ text, key: `${index}:${text}` })), plan.learningDay + 211), [mission.model, plan.learningDay]);
+  const optionalItems = useMemo(() => seededShuffle([
+    ...grammarByLevel[progress.selectedLevel].map((item) => ({ id: `grammar:${item.id}`, model: item.example, translation: item.translation, note: item.explanation })),
+    ...missionsByLevel[progress.selectedLevel].map((item) => ({ id: `mission:${item.id}`, model: item.model, translation: item.translation, note: item.situation })),
+  ], plan.learningDay + 557).slice(0, 16), [plan.learningDay, progress.selectedLevel]);
+  const [requiredSelected, setRequiredSelected] = useState<string[]>([]);
+  const [requiredResult, setRequiredResult] = useState<"" | "correct" | "wrong">("");
+  const [optionalPosition, setOptionalPosition] = useState(0);
+  const [optionalSelected, setOptionalSelected] = useState<string[]>([]);
+  const [optionalResult, setOptionalResult] = useState<"" | "correct" | "wrong">("");
+  const optionalItem = optionalItems[optionalPosition];
+  const optionalTiles = useMemo(() => seededShuffle(sentenceTokens(optionalItem.model).map((text, index) => ({ text, key: `${index}:${text}` })), plan.learningDay + optionalPosition * 41 + 733), [optionalItem.model, optionalPosition, plan.learningDay]);
+  const requiredSelectedSet = new Set(requiredSelected);
+  const optionalSelectedSet = new Set(optionalSelected);
+  const requiredBuilt = requiredSelected.map((key) => requiredTiles.find((tile) => tile.key === key)!.text);
+  const optionalBuilt = optionalSelected.map((key) => optionalTiles.find((tile) => tile.key === key)!.text);
+  const addRequired = (key: string) => { setRequiredSelected((items) => [...items, key]); setRequiredResult(""); };
+  const removeRequired = (index: number) => { setRequiredSelected((items) => items.filter((_, itemIndex) => itemIndex !== index)); setRequiredResult(""); };
+  const resetRequired = () => { setRequiredSelected([]); setRequiredResult(""); };
+  const checkRequired = () => {
+    const correct = tokensMatch(requiredBuilt, mission.model);
+    setRequiredResult(correct ? "correct" : "wrong");
     update((current) => {
       let next = recordSkill(current, "sentence", correct);
       if (!correct) next = queueCorrection(next, { id: `build:${mission.id}`, skill: "sentence", prompt: mission.translation, answer: mission.model, choices: choices(mission.model, missionsByLevel[current.selectedLevel].map((item) => item.model), plan.learningDay + 93), explanation: "Rebuild the whole idea; watch verb endings, agreement, and word order.", speech: mission.model });
       return next;
     });
   };
-  return <section className="coach-panel"><StepHeader step="build" kicker={`MISSION · ${mission.title}`} /><div className="tile-builder mission-builder"><span>Say this in Spanish</span><h2>{mission.translation}</h2><div className="sentence-well">{built.length ? built.join(" ") : "Build the complete response"}</div><div className="tile-bank">{tiles.map((tile) => <button key={tile.key} disabled={selectedSet.has(tile.key) || Boolean(result)} onClick={() => setSelected((items) => [...items, tile.key])}>{tile.text}</button>)}</div>{!result ? <div className="builder-actions"><button onClick={() => setSelected([])}>Reset</button><button className="primary-action" disabled={selected.length !== tiles.length} onClick={check}>Check line <span>→</span></button></div> : <div className={`feedback-box ${result}`}><strong>{result === "correct" ? "Your line is ready." : "Use this order."}</strong><p>{mission.model}</p><SoundButton text={mission.model} /><button className="primary-action" onClick={done}>Continue <span>→</span></button></div>}</div></section>;
+  const addOptional = (key: string) => { setOptionalSelected((items) => [...items, key]); setOptionalResult(""); };
+  const removeOptional = (index: number) => { setOptionalSelected((items) => items.filter((_, itemIndex) => itemIndex !== index)); setOptionalResult(""); };
+  const resetOptional = () => { setOptionalSelected([]); setOptionalResult(""); };
+  const checkOptional = () => {
+    const correct = tokensMatch(optionalBuilt, optionalItem.model);
+    setOptionalResult(correct ? "correct" : "wrong");
+    update((current) => {
+      let next = recordSkill(current, "sentence", correct);
+      if (!correct) next = queueCorrection(next, { id: `sentence-bank:${progress.selectedLevel}:${optionalItem.id}`, skill: "sentence", prompt: optionalItem.translation, answer: optionalItem.model, choices: choices(optionalItem.model, optionalItems.map((item) => item.model), plan.learningDay + optionalPosition + 809), explanation: `Natural Spanish order: ${optionalItem.model} ${optionalItem.note}`, speech: optionalItem.model });
+      return next;
+    });
+  };
+  const nextOptional = () => { setOptionalPosition((value) => (value + 1) % optionalItems.length); setOptionalSelected([]); setOptionalResult(""); };
+  return <section className="coach-panel"><StepHeader step="build" kicker={`MISSION · ${mission.title}`} /><div className="required-practice-wrap"><div className="builder-lab mission-builder"><div className="builder-instructions"><span>BUILD THE MISSION · DAY {plan.phase + 1} / 3</span><h2>Assemble the line you will perform.</h2><p>{mission.translation} Put the Spanish into its natural order. Tap a placed piece to move it back.</p></div><div className="builder-board"><div className="sentence-line">{requiredBuilt.length ? requiredBuilt.map((text, index) => <button key={`${requiredSelected[index]}:placed`} onClick={() => removeRequired(index)}>{text}</button>) : <span>Tap the pieces below to build the mission line…</span>}</div><div className="word-bank">{requiredTiles.filter((tile) => !requiredSelectedSet.has(tile.key)).map((tile) => <button key={tile.key} onClick={() => addRequired(tile.key)}>{tile.text}</button>)}</div><div className="builder-actions"><button onClick={resetRequired}>Reset</button><button className="primary-action" disabled={!requiredSelected.length} onClick={checkRequired}>Check mission line <span>→</span></button></div>{requiredResult && <div className={`builder-result ${requiredResult}`}><span>{requiredResult === "correct" ? `Correct — ${mission.translation}` : "Almost. Move one piece at a time or reset and rebuild the mission line."}</span>{requiredResult === "correct" && <div><SoundButton text={mission.model} /><button className="primary-action" onClick={done}>Continue to reading <span>→</span></button></div>}</div>}</div></div><details className="extra-practice"><summary>Extra sentence reps <span>16-challenge practice bank</span></summary><div className="builder-lab optional-builder"><div className="builder-instructions"><span>OPTIONAL SENTENCE LAB · {optionalPosition + 1} / {optionalItems.length}</span><h2>Build another thought.</h2><p>{optionalItem.translation} This practice bank adds sentence-building evidence without changing today’s required mission.</p></div><div className="builder-board"><div className="sentence-line">{optionalBuilt.length ? optionalBuilt.map((text, index) => <button key={`${optionalSelected[index]}:placed`} onClick={() => removeOptional(index)}>{text}</button>) : <span>Tap the pieces below to build the sentence…</span>}</div><div className="word-bank">{optionalTiles.filter((tile) => !optionalSelectedSet.has(tile.key)).map((tile) => <button key={tile.key} onClick={() => addOptional(tile.key)}>{tile.text}</button>)}</div><div className="builder-actions"><button onClick={resetOptional}>Reset</button><button className="primary-action" disabled={!optionalSelected.length} onClick={checkOptional}>Check sentence <span>→</span></button></div>{optionalResult && <div className={`builder-result ${optionalResult}`}><span>{optionalResult === "correct" ? `Correct — ${optionalItem.translation}` : "Almost. Move one piece at a time or reset and try the Spanish order."}</span><div>{optionalResult === "correct" && <SoundButton text={optionalItem.model} />}<button onClick={nextOptional}>Next <span>→</span></button></div></div>}</div></div></details></div></section>;
 }
 
 function ReadStep({ progress, update, done }: Props & { done: () => void }) {

@@ -1,4 +1,4 @@
-const CACHE = "dilo-pages-v7";
+const CACHE = "dilo-pages-v8";
 const APP_SHELL = ["./", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/icon-maskable-512.png", "./icons/apple-touch-icon.png", "./og.png"];
 
 self.addEventListener("install", (event) => {

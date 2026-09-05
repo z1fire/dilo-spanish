@@ -53,7 +53,7 @@ test("builds a repository-path-safe GitHub Pages companion", async () => {
   assert.match(html, /https:\/\/z1fire\.github\.io\/dilo-spanish\//);
   assert.match(manifest, /"start_url": "\.\/#today"/);
   assert.match(manifest, /"scope": "\.\/"/);
-  assert.match(serviceWorker, /dilo-pages-v7/);
+  assert.match(serviceWorker, /dilo-pages-v8/);
   assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(appSource, /https:\/\/dilo-spanish-a1\.z1ifre\.chatgpt\.site/);
 });
@@ -124,6 +124,15 @@ test("ships the complete A1–C2 learning engine", async () => {
   assert.match(coach, /meaningResult === "correct"/);
   assert.match(coach, /gapResult === "correct"/);
   assert.doesNotMatch(coach, /Continue to missing phrase|setPhase\("done"\)/);
+  assert.match(coach, /BUILD THE MISSION · DAY/);
+  assert.match(coach, /Tap a placed piece to move it back/);
+  assert.match(coach, /Extra sentence reps/);
+  assert.match(coach, /16-challenge practice bank/);
+  assert.match(coach, /OPTIONAL SENTENCE LAB/);
+  assert.match(coach, /requiredResult === "correct"/);
+  assert.match(coach, /Almost\. Move one piece at a time or reset and rebuild the mission line/);
+  assert.match(coach, /Continue to reading/);
+  assert.doesNotMatch(coach, /Use this order\.|disabled=\{selectedSet\.has/);
   assert.match(labs, /Twenty listening items and twenty reading\/usage items/);
   assert.match(labs, /move forward and back/);
   assert.match(labs, /EXACT DAY REPLAY/);
