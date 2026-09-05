@@ -53,7 +53,7 @@ test("builds a repository-path-safe GitHub Pages companion", async () => {
   assert.match(html, /https:\/\/z1fire\.github\.io\/dilo-spanish\//);
   assert.match(manifest, /"start_url": "\.\/#today"/);
   assert.match(manifest, /"scope": "\.\/"/);
-  assert.match(serviceWorker, /dilo-pages-v5/);
+  assert.match(serviceWorker, /dilo-pages-v6/);
   assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(appSource, /https:\/\/dilo-spanish-a1\.z1ifre\.chatgpt\.site/);
 });
@@ -106,7 +106,15 @@ test("ships the complete A1–C2 learning engine", async () => {
   assert.match(coach, /Hide answer & retry/);
   assert.match(coach, /Retest missed words/);
   assert.doesNotMatch(coach, /ReviewGrade|recall-grades|>Again<|>Hard<|>Good<|>Easy</);
-  assert.match(mixerUi, /I can use the pattern/);
+  assert.match(coach, /FULL-SYLLABUS GRAMMAR/);
+  assert.match(coach, /Hide the lesson & start recall/);
+  assert.match(coach, /RECALL · LESSON HIDDEN/);
+  assert.match(coach, /Need help\? Reopen the lesson/);
+  assert.match(coach, /Why this works/);
+  assert.doesNotMatch(coach, /Build the example from memory|Vary the pattern/);
+  assert.match(mixerUi, /MIX & MATCH PATTERN LAB/);
+  assert.match(mixerUi, /Tap the scrambled pieces below to build the sentence/);
+  assert.doesNotMatch(mixerUi, /Needs practice|I can use the pattern/);
   assert.match(mixerData, /linked verb|agreement|subjunctive/i);
   assert.match(coach, /Choose the missing Spanish words/);
   assert.match(labs, /Twenty listening items and twenty reading\/usage items/);

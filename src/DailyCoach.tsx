@@ -28,6 +28,7 @@ type Props = {
   progress: Progress;
   update: (recipe: (current: Progress) => Progress) => void;
   close: () => void;
+  openGrammarLibrary?: () => void;
 };
 
 const stepLabels: Record<DailyStep, { short: string; title: string; note: string }> = {
@@ -59,7 +60,7 @@ function completeCardExample(level: Progress["selectedLevel"], word: { spanish: 
   return { spanish: `«${word.spanish.replace("…", "").trim()}»`, english: word.english };
 }
 
-function CardSpeechPractice({ phrase }: { phrase: string }) {
+function CardSpeechPractice({ phrase, listenLabel = "Hear word", onAttempt }: { phrase: string; listenLabel?: string; onAttempt?: (correct: boolean) => void }) {
   const [listening, setListening] = useState(false);
   const [heard, setHeard] = useState("");
   const [manual, setManual] = useState(false);
@@ -71,14 +72,16 @@ function CardSpeechPractice({ phrase }: { phrase: string }) {
     recognition.lang = "es-ES"; recognition.interimResults = false; recognition.continuous = false;
     recognition.onresult = (event) => {
       const transcript = event.results[0]?.[0]?.transcript ?? "";
-      setHeard(`${transcript} · ${similarityScore(transcript, phrase)}% match`);
+      const score = similarityScore(transcript, phrase);
+      setHeard(`${transcript} · ${score}% match`);
+      onAttempt?.(score >= 65);
       setListening(false);
     };
     recognition.onerror = () => { setListening(false); setManual(true); };
     recognition.onend = () => setListening(false);
     setHeard(""); setListening(true); recognition.start();
   };
-  return <div className="card-speech-practice"><button onClick={() => speakSpanish(phrase)}>◖)) Hear word</button><button disabled={listening} onClick={practice}>{listening ? "Listening…" : "Speak this phrase"}</button>{manual && <span>Say it aloud, then continue.</span>}{heard && <span>Heard: {heard}</span>}</div>;
+  return <div className="card-speech-practice"><button onClick={() => speakSpanish(phrase)}>◖)) {listenLabel}</button><button disabled={listening} onClick={practice}>{listening ? "Listening…" : "Speak this phrase"}</button>{manual && <span>Say it aloud, then continue.</span>}{heard && <span>Heard: {heard}</span>}</div>;
 }
 
 function CardsStep({ progress, update, done }: Props & { done: () => void }) {
@@ -159,33 +162,41 @@ function RecallStep({ progress, update, done }: Props & { done: () => void }) {
   return <section className="coach-panel"><StepHeader step="recall" kicker={`AUTOMATIC RECALL CADENCE · ${position + 1}/${queue.length}${round === "main" ? "" : " · OPTIONAL"}`} /><div className="learning-brief recall-brief"><div><span>{modeLabel}</span><h2>Retrieve it without the card.</h2><p>Choose from memory. A miss reveals the complete answer and must be retried before this card can advance.</p></div><aside><span>NEXT AUTOMATIC RETURN</span><strong>{nextInterval} learning day{nextInterval === 1 ? "" : "s"}</strong><small>Dilo sets the cadence after successful retrieval.</small></aside></div><article className="recall-card">{feedback === "question" && <>{mode === "audio" ? <><span>LISTEN · ANSWER HIDDEN</span><button className="listen-orb" onClick={() => speakSpanish(word.spanish)} aria-label="Play hidden Spanish prompt">◖))</button><p className="recall-instruction">Listen, then choose the meaning.</p></> : <><span>{mode === "meaning" ? "CHOOSE THE SPANISH YOU REMEMBER" : "CHOOSE THE MEANING"}</span><h2>{mode === "meaning" ? word.english : word.spanish}</h2></>}<div className="recall-choice-grid">{options.map((option, index) => <button key={option} onClick={() => chooseAnswer(option)}><b>{String.fromCharCode(65 + index)}</b><span>{option}</span></button>)}</div><button className="dont-recall" onClick={miss}>I don’t recall</button></>}{feedback === "missed" && <div className="recall-remediation"><span>MISSED · STUDY THE COMPLETE ANSWER</span><h2>{word.spanish}</h2><p>{word.english}</p><small>{word.cue}</small><div className="card-example"><span>EXAMPLE IN CONTEXT</span><b>{example.spanish}</b><small>{example.english}</small></div><div className="card-audio"><SoundButton text={word.spanish} /><SoundButton text={example.spanish} slow /></div><CardSpeechPractice phrase={word.spanish} /><p className="remediation-rule">This card cannot advance yet. Hide the answer and retrieve it again.</p><button className="primary-action" onClick={() => { resetSupport(); setFeedback("question"); }}>Hide answer & retry <span>→</span></button></div>}{feedback === "correct" && <div className="recall-confirmation"><span>CORRECT · QUICK CONFIRMATION</span><h2>{word.spanish}</h2><p>{word.english}</p><div className="confirmation-controls"><button onClick={() => speakSpanish(word.spanish)}>◖)) Hear word</button><button onClick={() => setShowSpeaking((value) => !value)}>Practice speaking</button><button onClick={() => setShowExample((value) => !value)}>{showExample ? "Hide example" : "See example"}</button><button onClick={() => setShowCue((value) => !value)}>{showCue ? "Hide usage cue" : "Show usage cue"}</button></div>{showCue && <small className="revealed-support">{word.cue}</small>}{showExample && <div className="card-example"><span>EXAMPLE IN CONTEXT</span><b>{example.spanish}</b><small>{example.english}</small><SoundButton text={example.spanish} /></div>}{showSpeaking && <CardSpeechPractice phrase={word.spanish} />}<button className="primary-action" onClick={advance}>Continue to next card <span>→</span></button></div>}</article></section>;
 }
 
-function GrammarStep({ progress, update, done }: Props & { done: () => void }) {
-  const plan = getArchive(progress).currentPlan!;
-  const lessons = grammarByLevel[progress.selectedLevel].filter((item) => plan.grammarIds.includes(item.id));
+function GrammarStep({ progress, update, done, openGrammarLibrary }: Props & { done: () => void }) {
+  const archive = getArchive(progress);
+  const plan = archive.currentPlan!;
+  const allLessons = grammarByLevel[progress.selectedLevel];
+  const lessons = allLessons.filter((item) => plan.grammarIds.includes(item.id));
   const [position, setPosition] = useState(() => Math.min(plan.grammarPosition, Math.max(0, lessons.length - 1)));
-  const [stage, setStage] = useState<"learn" | "retrieve" | "mix">("learn");
-  const [selected, setSelected] = useState<string[]>([]);
-  const [result, setResult] = useState<"" | "correct" | "wrong">("");
+  const [stage, setStage] = useState<"learn" | "recall">("learn");
+  const [result, setResult] = useState<"" | "wrong" | "correct">("");
   const lesson = lessons[position];
-  const tiles = useMemo(() => seededShuffle(sentenceTokens(lesson.example).map((text, index) => ({ text, key: `${index}:${text}` })), lesson.example.length), [lesson.example]);
-  const selectedKeys = new Set(selected);
-  const built = selected.map((key) => tiles.find((tile) => tile.key === key)!.text);
-  const check = () => {
-    const correct = tokensMatch(built, lesson.example);
+  if (!lesson) return <div className="empty-step"><StepHeader step="grammar" /><h2>No grammar targets today.</h2><button className="primary-action" onClick={done}>Continue to listening <span>→</span></button></div>;
+  const lessonIndex = allLessons.findIndex((item) => item.id === lesson.id);
+  const reviewTarget = Boolean(archive.grammarReviews[lesson.id]);
+  const taught = new Set([...archive.learnedGrammarIds, ...Object.keys(archive.grammarReviews), lesson.id]).size;
+  const stable = Object.values(archive.grammarReviews).filter((item) => item.repetitions >= 3).length;
+  const coverage = Math.min(100, taught / allLessons.length * 100);
+  const options = choices(lesson.example, allLessons.map((item) => item.example), plan.learningDay * 31 + lessonIndex * 17);
+  const answer = (option: string) => {
+    if (result === "correct") return;
+    const correct = option === lesson.example;
     setResult(correct ? "correct" : "wrong");
     update((current) => {
       let next = recordSkill(current, "grammar", correct);
-      next = scheduleReview(next, lesson.id, correct, true);
-      if (!correct) next = queueCorrection(next, { id: `grammar:${lesson.id}`, skill: "grammar", prompt: lesson.formula, answer: lesson.example, choices: choices(lesson.example, grammarByLevel[current.selectedLevel].map((item) => item.example), position + 61), explanation: lesson.explanation, speech: lesson.example });
-      return next;
+      if (correct) return scheduleReview(next, lesson.id, true, true);
+      next = recordReviewMiss(next, lesson.id, true);
+      return queueCorrection(next, { id: `grammar:${lesson.id}`, skill: "grammar", prompt: lesson.translation, answer: lesson.example, choices: options, explanation: `${lesson.title}: ${lesson.formula}. ${lesson.explanation}`, speech: lesson.example });
     });
   };
+  const reopenLesson = () => { setStage("learn"); setResult(""); };
+  const beginRecall = () => { setStage("recall"); setResult(""); };
   const advance = () => {
     if (position >= lessons.length - 1) { update((current) => recordPlanPosition(current, "grammar", lessons.length)); done(); return; }
     update((current) => recordPlanPosition(current, "grammar", position + 1));
-    setPosition((value) => value + 1); setStage("learn"); setSelected([]); setResult("");
+    setPosition((value) => value + 1); setStage("learn"); setResult("");
   };
-  return <section className="coach-panel"><StepHeader step="grammar" kicker={`GRAMMAR ${position + 1}/${lessons.length}`} />{stage === "learn" ? <article className="grammar-lesson"><span>{lesson.level} · {lesson.title}</span><h2>{lesson.formula}</h2><p>{lesson.explanation}</p><button onClick={() => speakSpanish(lesson.example)}><strong>{lesson.example}</strong><small>{lesson.translation}</small><i>◖))</i></button><button className="primary-action" onClick={() => setStage("retrieve")}>Retrieve the pattern <span>→</span></button></article> : stage === "retrieve" ? <div className="tile-builder"><span>Build the example from memory</span><h3>{lesson.translation}</h3><div className="sentence-well">{built.length ? built.join(" ") : "Choose the words in order"}</div><div className="tile-bank">{tiles.map((tile) => <button key={tile.key} disabled={selectedKeys.has(tile.key) || Boolean(result)} onClick={() => setSelected((items) => [...items, tile.key])}>{tile.text}</button>)}</div>{!result && <div className="builder-actions"><button onClick={() => setSelected([])}>Reset</button><button className="primary-action" disabled={selected.length !== tiles.length} onClick={check}>Check line <span>→</span></button></div>}{result && <div className={`feedback-box ${result}`}><strong>{result === "correct" ? "Pattern assembled." : "Compare the complete line."}</strong><p>{lesson.example}</p><small>{lesson.explanation}</small><SoundButton text={lesson.example} /><button className="primary-action" onClick={() => setStage("mix")}>Vary the pattern <span>→</span></button></div>}</div> : <GrammarMixer level={progress.selectedLevel} rounds={1} compact onComplete={(confident) => { update((current) => recordSkill(current, "grammar", confident)); advance(); }} />}</section>;
+  return <section className="coach-panel"><StepHeader step="grammar" /><div className="grammar-lab-instructions"><span>FULL-SYLLABUS GRAMMAR · {reviewTarget ? "REVIEW TARGET" : "NEW TARGET"} · {lessonIndex + 1}/{allLessons.length}</span><h2>{lesson.title}</h2><p>First understand how the pattern works. Then hide the lesson and retrieve it from memory—the answer is never visible during the question.</p><i><b style={{ width: `${coverage}%` }} /></i><small>{taught} taught · {stable} stable · {Math.max(0, allLessons.length - taught)} still to introduce</small>{openGrammarLibrary && <button onClick={openGrammarLibrary}>Browse all {allLessons.length} grammar targets →</button>}</div><article className={`grammar-teach-card grammar-stage-${stage}`}><div className="grammar-stage-track" aria-label="Grammar lesson stages"><span className={stage === "learn" ? "active" : "complete"}><b>1</b> Learn</span><i>→</i><span className={stage === "recall" ? "active" : ""}><b>2</b> Recall</span></div>{stage === "learn" ? <><span>{lesson.level} · MEANING-LINKED PATTERN</span><h3>Understand the pattern</h3><code>{lesson.formula}</code><div className="grammar-notice"><strong>What to notice</strong><p>{lesson.explanation} Read the structure from left to right, keep the fixed Spanish pieces in place, and change the descriptive slots with the agreement the sentence requires.</p></div><button className="grammar-model" onClick={() => speakSpanish(lesson.example)}><span>◖))</span><strong>{lesson.example}</strong><em>{lesson.translation}</em></button><GrammarMixer key={`daily-${lesson.id}`} level={progress.selectedLevel} rounds={1} compact seed={lessonIndex} /><div className="grammar-study-steps"><span><b>1</b> Read the pattern</span><span><b>2</b> Listen and shadow</span><span><b>3</b> Recall without looking</span></div><button className="grammar-recall-start" onClick={beginRecall}>Hide the lesson & start recall <span>→</span></button></> : <><span>RECALL · LESSON HIDDEN</span><h3>Which Spanish sentence expresses “{lesson.translation}”?</h3><p className="grammar-recall-cue">Choose from memory. The pattern and model stay hidden until you answer correctly.</p><div className="grammar-recall-choices">{options.map((option, index) => <button key={option} onClick={() => answer(option)} disabled={result === "correct"}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div>{!result && <button className="grammar-help-button" onClick={reopenLesson}>Need help? Reopen the lesson</button>}{result && <div className="grammar-feedback"><div className={`grammar-result-note ${result}`}><span>{result === "correct" ? `Correct — ${lesson.formula}` : "Not quite. Compare the word order and try another choice, or reopen the lesson for help."}</span>{result === "wrong" && <button onClick={reopenLesson}>Reopen lesson</button>}</div>{result === "correct" && <div className="grammar-answer-review"><strong>Why this works</strong><code>{lesson.formula}</code><button className="grammar-model" onClick={() => speakSpanish(lesson.example)}><span>◖))</span><strong>{lesson.example}</strong><em>{lesson.translation}</em></button><p>{lesson.explanation}</p><CardSpeechPractice phrase={lesson.example} listenLabel="Hear model" onAttempt={(correct) => update((current) => recordSkill(current, "speaking", correct))} /><button className="grammar-next-target" onClick={advance}>{position + 1 >= lessons.length ? "Continue to listening" : "Next grammar target"} <span>→</span></button></div>}</div>}</>}</article></section>;
 }
 
 function ListenStep({ progress, update, done }: Props & { done: () => void }) {
@@ -325,7 +336,7 @@ function CorrectionGate({ progress, update, finish }: Props & { finish: () => vo
   return <section className="coach-panel correction-gate"><div className="coach-heading"><span>CORRECTION LOOP · {corrections.length + (answer ? 1 : 0)} IN THIS PASS</span><h1>Fix it before<br />you finish.</h1><p>A miss returns now, then tomorrow. Two correct retrievals clear it.</p></div><article><span>{item.skill.toUpperCase()}</span><h2>{item.prompt}</h2>{item.speech && <SoundButton text={item.speech} />}<div className="choice-list">{item.choices.map((option) => <button key={option} disabled={Boolean(answer)} className={answer ? option === item.answer ? "correct" : option === answer ? "wrong" : "muted" : ""} onClick={() => choose(option)}>{option}</button>)}</div>{answer && <div className="feedback-box"><strong>{answer === item.answer ? (item.correctStreak ? "Correction cleared." : "Correct once. It returns next learning day.") : `Answer: ${item.answer}`}</strong><p>{item.explanation}</p><button className="primary-action" onClick={() => { setItem(dueCorrections(progress)[0] ?? null); setAnswer(""); }}>Next correction <span>→</span></button></div>}</article></section>;
 }
 
-export default function DailyCoach({ progress, update, close }: Props) {
+export default function DailyCoach({ progress, update, close, openGrammarLibrary }: Props) {
   const archive = getArchive(progress);
   const plan = archive.currentPlan!;
   const nextStep = DAILY_STEPS.find((step) => !plan.completedSteps.includes(step));
@@ -337,6 +348,6 @@ export default function DailyCoach({ progress, update, close }: Props) {
     setActiveStep(next ?? "gate");
   };
   const finish = () => { update((current) => completePlan(current)); close(); };
-  const shared = { progress, update, close };
+  const shared = { progress, update, close, openGrammarLibrary };
   return <main className="coach-shell"><header className="coach-topbar"><button onClick={close} aria-label="Close daily session">×</button><div><span>{progress.selectedLevel} · DAY {plan.learningDay + 1}{plan.bonus ? " · CATCH-UP" : ""}</span><strong>{mission.title}</strong></div><button className="help-toggle" onClick={() => update((current) => ({ ...current, showHelp: !current.showHelp }))}>{progress.showHelp ? "Help on" : "Help off"}</button></header><nav className="step-rail" aria-label="Daily session steps">{DAILY_STEPS.map((step, index) => { const complete = plan.completedSteps.includes(step); const available = complete || step === nextStep || step === activeStep; return <button key={step} className={complete ? "complete" : activeStep === step ? "active" : ""} disabled={!available} onClick={() => available && setActiveStep(step)}><span>{complete ? "✓" : index + 1}</span><small>{stepLabels[step].short}</small></button>; })}</nav><div className="coach-content">{activeStep === "cards" && <CardsStep {...shared} done={() => markDone("cards")} />}{activeStep === "recall" && <RecallStep {...shared} done={() => markDone("recall")} />}{activeStep === "grammar" && <GrammarStep {...shared} done={() => markDone("grammar")} />}{activeStep === "listen" && <ListenStep {...shared} done={() => markDone("listen")} />}{activeStep === "build" && <BuildStep {...shared} done={() => markDone("build")} />}{activeStep === "read" && <ReadStep {...shared} done={() => markDone("read")} />}{activeStep === "speak" && <SpeakStep {...shared} done={() => markDone("speak")} />}{activeStep === "gate" && <CorrectionGate {...shared} finish={finish} />}</div></main>;
 }

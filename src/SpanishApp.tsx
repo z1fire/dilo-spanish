@@ -55,7 +55,7 @@ const PREFERENCES_KEY = "dilo:spanish:preferences:v3";
 const V2_PREFERENCES_KEY = "dilo:spanish:preferences:v2";
 const RECOVERY_KEY = "dilo:spanish:recovery:v3";
 const SYNCED_APP_URL = "https://dilo-spanish-a1.z1ifre.chatgpt.site";
-const APP_VERSION = "3.1.0";
+const APP_VERSION = "3.2.0";
 
 function CorrectionLab({ progress, update, close }: { progress: Progress; update: (recipe: (current: Progress) => Progress) => void; close: () => void }) {
   const [answer, setAnswer] = useState("");
@@ -250,7 +250,7 @@ export default function SpanishApp() {
   async function installApp() { if (!installPrompt) return; await installPrompt.prompt(); await installPrompt.userChoice; setInstallPrompt(null); }
 
   if (!ready) return <main className="loading-screen"><div className="loading-sun"><span>di</span></div><p>Preparando tu camino…</p></main>;
-  if (coachOpen) return <DailyCoach progress={progress} update={update} close={() => setCoachOpen(false)} />;
+  if (coachOpen) return <DailyCoach progress={progress} update={update} close={() => setCoachOpen(false)} openGrammarLibrary={() => { setCoachOpen(false); setLibraryTab("grammar"); setView("library"); }} />;
   if (drill) return <DrillSession progress={progress} update={update} kind={drill} close={() => setDrill(null)} />;
   if (correctionsOpen) return <CorrectionLab progress={progress} update={update} close={() => setCorrectionsOpen(false)} />;
   if (examOpen) return <Checkpoint progress={progress} update={update} close={() => setExamOpen(false)} />;
