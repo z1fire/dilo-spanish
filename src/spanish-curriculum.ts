@@ -281,14 +281,164 @@ a duras penas|with great difficulty|Idiomatic adverb
 sin ambages|bluntly / without beating around the bush|Elevated idiom`,
 };
 
-function parseLexicon(level: LevelId, source: string): Lexeme[] {
+const extendedLexiconSource: Record<LevelId, string> = {
+  A1: `¿cómo estás?|how are you?|Use with people you address informally
+encantado / encantada|pleased to meet you|Match the ending to the speaker
+¿de dónde eres?|where are you from?|Informal origin question
+¿qué significa…?|what does … mean?|Useful classroom repair
+¿cómo se dice…?|how do you say…?|Follow with en español when needed
+un momento|one moment|A natural request to wait
+está bien|it is okay / all right|Agreement or reassurance
+no sé|I do not know|High-frequency conversation chunk
+tengo hambre|I am hungry|Spanish uses tener for physical states
+tengo sed|I am thirsty|Literally I have thirst
+me gustaría…|I would like…|Softer than quiero
+para mí|for me|Useful when ordering
+sin…|without…|Put before the omitted ingredient
+con…|with…|Put before the added ingredient
+¿tiene…?|do you have…?|Formal or service question
+¿hay…?|is there / are there…?|Existence question
+cerca de|near|Follow with a place
+lejos de|far from|Follow with a place
+todo recto|straight ahead|Direction chunk
+al lado de|next to|Location phrase
+antes de|before|Follow with noun or infinitive
+después de|after|Follow with noun or infinitive
+me gusta mucho|I like it a lot|Natural degree phrase
+nos vemos|see you|Literally we see each other`,
+  A2: `esta mañana|this morning|Finished or current depending on variety
+el otro día|the other day|Informal past-time frame
+hace dos días|two days ago|Hace + time for ago
+de pequeño / pequeña|as a child|Match the speaker
+cuando era niño / niña|when I was a child|Imperfect background frame
+todavía|still / yet|Position changes emphasis
+ya no|no longer|Keep both words around the verb
+desde hace…|for…|Duration continuing to now
+acabo de…|I have just…|Acabar de + infinitive
+¿qué pasó?|what happened?|Compact story prompt
+qué pena|what a shame|Empathetic response
+menos mal|thank goodness|Relief after a problem
+me viene bien|that works for me|Useful schedule response
+no me viene bien|that does not work for me|Polite availability phrase
+¿a qué hora quedamos?|what time shall we meet?|Planning chunk
+estar libre|to be free / available|Use with time expressions
+tener ganas de|to feel like|Follow with infinitive or noun
+parece que|it seems that|Observation or inference
+igual que|the same as / just like|Comparison frame
+más… que|more… than|Comparative frame
+menos… que|less… than|Comparative frame
+tan… como|as… as|Equality comparison
+se me ha olvidado|I have forgotten|Accidental se construction
+¿qué recomienda?|what do you recommend?|Formal service question`,
+  B1: `por un lado|on one hand|Pairs with por otro lado
+por otro lado|on the other hand|Balances the first point
+en primer lugar|firstly|Structured discourse marker
+en resumen|in summary|Closes an explanation
+por lo tanto|therefore|Formal result connector
+a pesar de|despite|Follow with a noun or infinitive
+debido a|due to|Cause phrase before a noun
+gracias a|thanks to|Usually positive cause
+tener en cuenta|to take into account|Fixed collocation
+estar a punto de|to be about to|Follow with infinitive
+seguir + gerundio|to keep doing|Continuity construction
+dejar de|to stop doing|Follow with infinitive
+llevar… + gerundio|to have been doing for…|Duration up to now
+es probable que|it is likely that|Often triggers subjunctive
+puede que|it may be that|Triggers subjunctive
+ojalá|hopefully / if only|Normally takes subjunctive
+si tuviera que elegir|if I had to choose|Useful hypothetical frame
+yo que tú|if I were you|Colloquial advice frame
+merece la pena|it is worth it|Common evaluative chunk
+estar acostumbrado a|to be used to|Follow with noun or infinitive
+llevarse bien|to get along well|Reflexive reciprocal expression
+echar de menos|to miss|Common in Spain; extrañar elsewhere
+hacer frente a|to face / deal with|Problem-management phrase
+llegar a un acuerdo|to reach an agreement|Negotiation collocation`,
+  B2: `ahora bien|that said / however|Introduces a qualification
+no obstante|nevertheless|Formal contrast connector
+por consiguiente|consequently|Formal result connector
+en la medida en que|insofar as|Limits the scope of a claim
+siempre y cuando|provided that|Usually takes subjunctive
+a menos que|unless|Takes subjunctive
+con tal de que|as long as|Condition with subjunctive
+de ahí que|hence the fact that|Takes subjunctive
+no cabe duda de que|there is no doubt that|Strong certainty frame
+no está claro que|it is not clear that|Triggers subjunctive
+hasta cierto punto|to a certain extent|Calibrates agreement
+en gran medida|to a large extent|Calibrates a claim
+poner en duda|to call into question|Argument collocation
+dar por sentado|to take for granted|Argument collocation
+pasar por alto|to overlook|Problem-analysis phrasal verb
+poner de relieve|to highlight|Formal analytical phrase
+llevar a cabo|to carry out|Project and research collocation
+plantear una cuestión|to raise an issue|Formal discussion chunk
+llegar a la conclusión|to reach the conclusion|Evidence-to-claim phrase
+a corto plazo|in the short term|Time-horizon frame
+a largo plazo|in the long term|Time-horizon frame
+desde el punto de vista de|from the standpoint of|Perspective marker
+en lo que respecta a|as regards|Topic-framing phrase
+sea como sea|be that as it may|Concession and reset`,
+  C1: `habida cuenta de|in view of|Elevated evidence frame
+si bien|although / while|Compact formal concession
+aun cuando|even when / even though|Often takes subjunctive
+por más que|no matter how much|Concessive frame
+de cara a|with a view to|Planning and orientation phrase
+a raíz de|as a result of|Introduces an originating cause
+en aras de|for the sake of|Formal purpose phrase
+sin perjuicio de|without prejudice to|Legal-administrative connector
+con creces|by far / amply|Intensifies exceeding a standard
+adolecer de|to suffer from / be lacking in|Formal critical verb
+poner en tela de juicio|to call into question|Strong analytical idiom
+dar cuenta de|to account for / report|Meaning depends on context
+hacer hincapié en|to emphasize|Formal collocation
+poner de manifiesto|to make clear|Evidence and analysis phrase
+sentar las bases de|to lay the foundations for|Institutional collocation
+estar supeditado a|to be contingent on|Formal dependency phrase
+ser proclive a|to be prone to|Evaluative tendency phrase
+no deja de ser|it is still / remains|Qualified evaluation
+cabe señalar que|it is worth noting that|Academic signposting
+conviene recordar que|it is worth remembering that|Tactful reminder frame
+dicho de otro modo|in other words|Reformulation marker
+en última instancia|ultimately|Final analytical frame
+a grandes rasgos|broadly speaking|Signals deliberate simplification
+salvedad|caveat / exception|Often used as con la salvedad de`,
+  C2: `a sabiendas de|in full knowledge of|Signals conscious action
+so pena de|on pain of / at the risk of|Elevated consequence phrase
+amén de|as well as|Elevated additive connector
+cuando menos|at the very least|Calibrated minimum claim
+huelga decir|it goes without saying|Highly formal discourse formula
+dicho sea de paso|incidentally|Parenthetical discourse marker
+mutatis mutandis|with necessary changes|Scholarly borrowed phrase
+en puridad|strictly speaking|Legal-analytical qualifier
+a todas luces|plainly / clearly|Strong evidential stance
+ni que decir tiene|needless to say|Idiomatic certainty frame
+mal que pese|much as it may displease|Concessive idiom
+de soslayo|obliquely|Manner or interpretive adverb
+al socaire de|under cover of / taking advantage of|Elevated causal-context phrase
+traer a colación|to bring up|Formal discussion idiom
+dar al traste con|to ruin / bring to nothing|Idiomatic consequence phrase
+poner coto a|to put a stop to|Formal intervention phrase
+pecar de|to be excessively / wrongly|Evaluative construction
+rayar en|to border on|Strong evaluative construction
+no ser óbice para|not to prevent|Formal concessive phrase
+prestarse a|to lend itself to|Interpretation or possibility phrase
+deslindar|to distinguish / demarcate|Precise analytical verb
+subsanar|to remedy / correct|Institutional repair verb
+menoscabar|to undermine|Formal harm verb
+zanjar la cuestión|to settle the matter|Definitive closure phrase`,
+};
+
+function parseLexicon(level: LevelId, source: string, offset = 0): Lexeme[] {
   return source.trim().split("\n").map((row, index) => {
     const [spanish, english, cue] = row.split("|");
-    return { id: `${level}-w${index + 1}`, level, spanish, english, cue };
+    return { id: `${level}-w${index + 1 + offset}`, level, spanish, english, cue };
   });
 }
 
-export const lexiconByLevel = Object.fromEntries(levelOrder.map((level) => [level, parseLexicon(level, lexiconSource[level])])) as Record<LevelId, Lexeme[]>;
+export const lexiconByLevel = Object.fromEntries(levelOrder.map((level) => {
+  const foundation = parseLexicon(level, lexiconSource[level]);
+  return [level, [...foundation, ...parseLexicon(level, extendedLexiconSource[level], foundation.length)]];
+})) as Record<LevelId, Lexeme[]>;
 export const allLexicon = levelOrder.flatMap((level) => lexiconByLevel[level]);
 
 const grammarSource: Record<LevelId, string> = {
@@ -489,4 +639,3 @@ export function levelIndex(level: LevelId) { return levelOrder.indexOf(level); }
 export function cumulativeLexicon(level: LevelId) { return allLexicon.filter((item) => levelIndex(item.level) <= levelIndex(level)); }
 export function cumulativeGrammar(level: LevelId) { return allGrammar.filter((item) => levelIndex(item.level) <= levelIndex(level)); }
 export function levelSoundLessons(level: LevelId) { return soundLessons.filter((item) => item.level === level); }
-

@@ -14,7 +14,7 @@ Every guided learning day follows the same complete loop:
 6. Read places that line in a four-turn exchange.
 7. Speak requires all four lines, using browser speech recognition or an explicit manual fallback.
 
-Objective misses enter a correction queue. A correction must be retrieved correctly now and on a later learning day. Unfinished sessions resume at the exact step, missed calendar days do not create a backlog, and one bonus learning day is available after the main session.
+Objective misses enter a correction queue. A correction must be retrieved correctly now and on a later learning day. Unfinished sessions resume at the exact item and step, missed calendar days do not create a backlog, and completing an older unfinished session unlocks one fresh catch-up session for the current day.
 
 ## Course shape
 

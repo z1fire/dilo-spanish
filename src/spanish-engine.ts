@@ -8,6 +8,7 @@ import {
 export const DAILY_STEPS = ["cards", "recall", "grammar", "listen", "build", "read", "speak"] as const;
 export type DailyStep = typeof DAILY_STEPS[number];
 export type SkillArea = "vocabulary" | "grammar" | "listening" | "reading" | "sentence" | "speaking" | "pronunciation";
+export type ReviewGrade = "again" | "hard" | "good" | "easy";
 
 export type ReviewState = {
   dueDay: number;
@@ -54,9 +55,27 @@ export type DailyPlan = {
   recallWordIds: string[];
   grammarIds: string[];
   completedSteps: DailyStep[];
+  flashcardPosition: number;
+  recallPosition: number;
+  grammarPosition: number;
   startedOn: string;
   completedOn: string;
   bonus: boolean;
+};
+
+export type StudyDay = {
+  id: string;
+  level: LevelId;
+  learningDay: number;
+  missionIndex: number;
+  phase: number;
+  newWordIds: string[];
+  recallWordIds: string[];
+  grammarIds: string[];
+  completedSteps: DailyStep[];
+  startedOn: string;
+  completedOn: string;
+  replayCount: number;
 };
 
 export type LevelArchive = {
@@ -72,7 +91,7 @@ export type LevelArchive = {
 };
 
 export type Progress = {
-  version: 2;
+  version: 3;
   onboarded: boolean;
   goal: string;
   dailyMinutes: number;
@@ -91,6 +110,9 @@ export type Progress = {
   skillStats: Record<string, SkillStat>;
   corrections: Correction[];
   examHistory: ExamAttempt[];
+  studyHistory: Partial<Record<LevelId, StudyDay[]>>;
+  wordConfidence: Record<string, number>;
+  pronunciationDone: string[];
 };
 
 export type GraduationStatus = {
@@ -118,7 +140,7 @@ export function emptyArchive(): LevelArchive {
 
 export function starterProgress(): Progress {
   return {
-    version: 2,
+    version: 3,
     onboarded: false,
     goal: "Speak with confidence",
     dailyMinutes: 20,
@@ -137,6 +159,9 @@ export function starterProgress(): Progress {
     skillStats: {},
     corrections: [],
     examHistory: [],
+    studyHistory: {},
+    wordConfidence: {},
+    pronunciationDone: [],
   };
 }
 
@@ -168,9 +193,32 @@ function normalizePlan(value: unknown, level: LevelId): DailyPlan | null {
     recallWordIds: strings(raw.recallWordIds),
     grammarIds: strings(raw.grammarIds),
     completedSteps: strings(raw.completedSteps).filter((step): step is DailyStep => DAILY_STEPS.includes(step as DailyStep)),
+    flashcardPosition: Math.max(0, finite(raw.flashcardPosition)),
+    recallPosition: Math.max(0, finite(raw.recallPosition)),
+    grammarPosition: Math.max(0, finite(raw.grammarPosition)),
     startedOn: typeof raw.startedOn === "string" ? raw.startedOn : localDate(),
     completedOn: typeof raw.completedOn === "string" ? raw.completedOn : "",
     bonus: Boolean(raw.bonus),
+  };
+}
+
+function normalizeStudyDay(value: unknown, level: LevelId): StudyDay | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<StudyDay>;
+  const learningDay = Math.max(0, finite(raw.learningDay));
+  return {
+    id: typeof raw.id === "string" ? raw.id : `${level}-${learningDay}-${String(raw.completedOn ?? "restored")}`,
+    level,
+    learningDay,
+    missionIndex: Math.max(0, Math.min(11, finite(raw.missionIndex))),
+    phase: Math.max(0, Math.min(2, finite(raw.phase))),
+    newWordIds: strings(raw.newWordIds),
+    recallWordIds: strings(raw.recallWordIds),
+    grammarIds: strings(raw.grammarIds),
+    completedSteps: strings(raw.completedSteps).filter((step): step is DailyStep => DAILY_STEPS.includes(step as DailyStep)),
+    startedOn: typeof raw.startedOn === "string" ? raw.startedOn : "",
+    completedOn: typeof raw.completedOn === "string" ? raw.completedOn : "",
+    replayCount: Math.max(0, finite(raw.replayCount)),
   };
 }
 
@@ -225,7 +273,7 @@ export function normalizeProgress(value: unknown): Progress {
   const base = starterProgress();
   if (!value || typeof value !== "object") return ensureCurrentPlan(base);
   const raw = value as Record<string, unknown>;
-  if (raw.version !== 2) return ensureCurrentPlan(migrateLegacy(raw));
+  if (raw.version !== 2 && raw.version !== 3) return ensureCurrentPlan(migrateLegacy(raw));
   const selectedLevel = (["A1", "A2", "B1", "B2", "C1", "C2"].includes(String(raw.selectedLevel)) ? raw.selectedLevel : "A1") as LevelId;
   const archivesRaw = raw.archives && typeof raw.archives === "object" ? raw.archives as Partial<Record<LevelId, unknown>> : {};
   const archives: Partial<Record<LevelId, LevelArchive>> = {};
@@ -236,7 +284,7 @@ export function normalizeProgress(value: unknown): Progress {
   const trainingDate = typeof raw.trainingDate === "string" ? raw.trainingDate : localDate();
   const progress: Progress = {
     ...base,
-    version: 2,
+    version: 3,
     onboarded: Boolean(raw.onboarded),
     goal: typeof raw.goal === "string" ? raw.goal : base.goal,
     dailyMinutes: [10, 20, 30].includes(finite(raw.dailyMinutes)) ? finite(raw.dailyMinutes) : 20,
@@ -255,6 +303,9 @@ export function normalizeProgress(value: unknown): Progress {
     skillStats: raw.skillStats && typeof raw.skillStats === "object" ? raw.skillStats as Record<string, SkillStat> : {},
     corrections: Array.isArray(raw.corrections) ? raw.corrections.filter((item): item is Correction => Boolean(item && typeof item === "object")) : [],
     examHistory: Array.isArray(raw.examHistory) ? raw.examHistory.filter((item): item is ExamAttempt => Boolean(item && typeof item === "object")) : [],
+    studyHistory: Object.fromEntries((['A1', 'A2', 'B1', 'B2', 'C1', 'C2'] as LevelId[]).map((level) => [level, (Array.isArray((raw.studyHistory as Partial<Record<LevelId, unknown[]>> | undefined)?.[level]) ? (raw.studyHistory as Partial<Record<LevelId, unknown[]>>)[level] ?? [] : []).map((item) => normalizeStudyDay(item, level)).filter((item): item is StudyDay => Boolean(item)).slice(-180)])),
+    wordConfidence: raw.wordConfidence && typeof raw.wordConfidence === "object" ? Object.fromEntries(Object.entries(raw.wordConfidence as Record<string, unknown>).map(([id, score]) => [id, Math.max(0, Math.min(5, finite(score)))])) : {},
+    pronunciationDone: strings(raw.pronunciationDone),
   };
   return ensureCurrentPlan(progress);
 }
@@ -292,6 +343,9 @@ function makeDailyPlan(progress: Progress, level: LevelId, bonus = false): Daily
     recallWordIds: recallWordIds.length ? recallWordIds : words.slice((archive.learningDay * progress.dailyNew) % words.length, ((archive.learningDay * progress.dailyNew) % words.length) + progress.dailyNew).map((item) => item.id),
     grammarIds: grammarIds.length ? grammarIds : [grammar[archive.learningDay % grammar.length].id],
     completedSteps: [],
+    flashcardPosition: 0,
+    recallPosition: 0,
+    grammarPosition: 0,
     startedOn: localDate(),
     completedOn: "",
     bonus,
@@ -307,12 +361,29 @@ export function ensureCurrentPlan(progress: Progress): Progress {
   return { ...progress, archives: { ...progress.archives, [level]: nextArchive } };
 }
 
-export function startBonusPlan(progress: Progress): Progress {
+export function canAdvanceCatchUp(progress: Progress) {
+  const archive = getArchive(progress);
+  const plan = archive.currentPlan;
+  return Boolean(plan?.completedOn === localDate() && plan.startedOn < localDate() && archive.bonusDate !== localDate());
+}
+
+export function advanceCatchUpSession(progress: Progress): Progress {
   const level = progress.selectedLevel;
   const archive = getArchive(progress, level);
-  if (!archive.currentPlan?.completedOn || archive.bonusDate === localDate()) return progress;
+  if (!canAdvanceCatchUp(progress)) return progress;
   const nextArchive = { ...archive, bonusDate: localDate(), currentPlan: makeDailyPlan(progress, level, true) };
   return { ...progress, archives: { ...progress.archives, [level]: nextArchive } };
+}
+
+export function recordPlanPosition(progress: Progress, step: "cards" | "recall" | "grammar", position: number): Progress {
+  const level = progress.selectedLevel;
+  const archive = getArchive(progress, level);
+  const plan = archive.currentPlan;
+  if (!plan) return progress;
+  const key = step === "cards" ? "flashcardPosition" : step === "recall" ? "recallPosition" : "grammarPosition";
+  const nextPosition = Math.max(0, Math.floor(position));
+  if (plan[key] === nextPosition) return progress;
+  return { ...progress, archives: { ...progress.archives, [level]: { ...archive, currentPlan: { ...plan, [key]: nextPosition } } } };
 }
 
 export function completeStep(progress: Progress, step: DailyStep): Progress {
@@ -350,6 +421,21 @@ export function completePlan(progress: Progress): Progress {
     learnedGrammarIds: unique([...archive.learnedGrammarIds, ...plan.grammarIds]),
     currentPlan: { ...plan, completedOn: today },
   };
+  const historyItem: StudyDay = {
+    id: plan.id,
+    level,
+    learningDay: plan.learningDay,
+    missionIndex: plan.missionIndex,
+    phase: plan.phase,
+    newWordIds: [...plan.newWordIds],
+    recallWordIds: [...plan.recallWordIds],
+    grammarIds: [...plan.grammarIds],
+    completedSteps: [...plan.completedSteps],
+    startedOn: plan.startedOn,
+    completedOn: today,
+    replayCount: progress.studyHistory[level]?.find((item) => item.id === plan.id)?.replayCount ?? 0,
+  };
+  const priorHistory = progress.studyHistory[level] ?? [];
   return {
     ...progress,
     xp: progress.xp + 75,
@@ -357,19 +443,40 @@ export function completePlan(progress: Progress): Progress {
     lastStudyDate: today,
     activeDays: unique([...progress.activeDays, today]).slice(-730),
     archives: { ...progress.archives, [level]: nextArchive },
+    studyHistory: { ...progress.studyHistory, [level]: [...priorHistory.filter((item) => item.id !== plan.id), historyItem].slice(-180) },
   };
 }
 
-const intervals = [1, 3, 7, 14, 30, 60, 120];
-export function scheduleReview(progress: Progress, id: string, correct: boolean, grammar = false): Progress {
+export function recordStudyDayReplay(progress: Progress, level: LevelId, id: string): Progress {
+  return { ...progress, studyHistory: { ...progress.studyHistory, [level]: (progress.studyHistory[level] ?? []).map((item) => item.id === id ? { ...item, replayCount: item.replayCount + 1 } : item) } };
+}
+
+export function recordWordConfidence(progress: Progress, id: string, correct: boolean): Progress {
+  const prior = progress.wordConfidence[id] ?? 0;
+  return { ...progress, wordConfidence: { ...progress.wordConfidence, [id]: correct ? Math.min(5, prior + 1) : Math.max(0, prior - 1) } };
+}
+
+export function recordPronunciation(progress: Progress, id: string, correct: boolean): Progress {
+  const done = correct ? unique([...progress.pronunciationDone, id]) : progress.pronunciationDone;
+  return recordSkill({ ...progress, pronunciationDone: done }, "pronunciation", correct);
+}
+
+export function scheduleReview(progress: Progress, id: string, grade: ReviewGrade | boolean, grammar = false): Progress {
   const level = progress.selectedLevel;
   const archive = getArchive(progress, level);
   const key = grammar ? "grammarReviews" : "reviews";
   const map = archive[key];
   const previous = map[id] ?? { dueDay: archive.learningDay, interval: 1, repetitions: 0, lapses: 0 };
-  const repetitions = correct ? previous.repetitions + 1 : 0;
-  const interval = correct ? intervals[Math.min(repetitions - 1, intervals.length - 1)] : 1;
-  const state: ReviewState = { dueDay: archive.learningDay + interval, interval, repetitions, lapses: previous.lapses + (correct ? 0 : 1) };
+  const resolved: ReviewGrade = typeof grade === "boolean" ? (grade ? "good" : "again") : grade;
+  const factors: Record<ReviewGrade, number> = { again: 0, hard: 1.2, good: 2.2, easy: 3.2 };
+  const initial: Record<ReviewGrade, number> = { again: 0, hard: 1, good: 3, easy: 7 };
+  const interval = resolved === "again" ? 0 : Math.max(initial[resolved], Math.round(previous.interval * factors[resolved]));
+  const state: ReviewState = {
+    dueDay: archive.learningDay + interval,
+    interval: Math.max(1, interval),
+    repetitions: resolved === "again" ? 0 : previous.repetitions + 1,
+    lapses: previous.lapses + (resolved === "again" ? 1 : 0),
+  };
   return { ...progress, archives: { ...progress.archives, [level]: { ...archive, [key]: { ...map, [id]: state } } } };
 }
 
@@ -493,4 +600,3 @@ export function seededShuffle<T>(items: readonly T[], seed = Date.now()) {
 export function choices(answer: string, pool: string[], seed: number, count = 4) {
   return seededShuffle(unique([answer, ...seededShuffle(pool.filter((item) => item !== answer), seed).slice(0, count - 1)]), seed + 91);
 }
-

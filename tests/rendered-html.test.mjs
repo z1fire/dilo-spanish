@@ -53,17 +53,19 @@ test("builds a repository-path-safe GitHub Pages companion", async () => {
   assert.match(html, /https:\/\/z1fire\.github\.io\/dilo-spanish\//);
   assert.match(manifest, /"start_url": "\.\/#today"/);
   assert.match(manifest, /"scope": "\.\/"/);
-  assert.match(serviceWorker, /dilo-pages-v3/);
+  assert.match(serviceWorker, /dilo-pages-v4/);
   assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(appSource, /https:\/\/dilo-spanish-a1\.z1ifre\.chatgpt\.site/);
 });
 
 test("ships the complete A1–C2 learning engine", async () => {
-  const [curriculum, engine, coach, labs, appSource] = await Promise.all([
+  const [curriculum, engine, coach, labs, mixerUi, mixerData, appSource] = await Promise.all([
     readFile(new URL("../src/spanish-curriculum.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/spanish-engine.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/DailyCoach.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/PracticeLabs.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/GrammarMixer.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/spanish-mixer.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/SpanishApp.tsx", import.meta.url), "utf8"),
   ]);
 
@@ -80,6 +82,7 @@ test("ships the complete A1–C2 learning engine", async () => {
 
   for (const level of ["A1", "A2", "B1", "B2", "C1", "C2"]) {
     assert.equal(rowsFor("lexiconSource", level).length, 36, `${level} lexical core`);
+    assert.equal(rowsFor("extendedLexiconSource", level).length, 24, `${level} extended lexical core`);
     assert.equal(rowsFor("grammarSource", level).length, 12, `${level} grammar core`);
     assert.equal(rowsFor("missionSource", level).length, 12, `${level} mission core`);
     assert.ok(rowsFor("missionSource", level).every((row) => row.split("|").length === 9), `${level} missions are complete`);
@@ -87,15 +90,25 @@ test("ships the complete A1–C2 learning engine", async () => {
 
   assert.match(curriculum, /\["A1", "A2", "B1", "B2", "C1", "C2"\]/);
   assert.match(engine, /DAILY_STEPS = \["cards", "recall", "grammar", "listen", "build", "read", "speak"\]/);
-  assert.match(engine, /version: 2/);
+  assert.match(engine, /version: 3/);
   assert.match(engine, /Correction queue clear/);
+  assert.match(engine, /recordStudyDayReplay/);
+  assert.match(engine, /ReviewGrade = "again" \| "hard" \| "good" \| "easy"/);
+  assert.match(engine, /canAdvanceCatchUp/);
   assert.match(coach, /FOUR-LINE MISSION/);
   assert.match(coach, /Speech recognition checks approximate word similarity, not accent/);
   assert.doesNotMatch(coach, /<input\b/);
   assert.doesNotMatch(coach, /Type what you remember|Write the complete Spanish line/);
   assert.match(coach, /Reveal answer/);
+  assert.match(coach, /Retest missed only/);
+  assert.match(mixerUi, /I can use the pattern/);
+  assert.match(mixerData, /linked verb|agreement|subjunctive/i);
   assert.match(coach, /Choose the missing Spanish words/);
   assert.match(labs, /Twenty listening items and twenty reading\/usage items/);
+  assert.match(labs, /move forward and back/);
+  assert.match(labs, /EXACT DAY REPLAY/);
   assert.match(appSource, /A1 → C2/);
+  assert.match(appSource, /Meaning-linked patterns/);
+  assert.match(appSource, /EXACT STUDY HISTORY/);
   assert.match(appSource, /B2 IS THE CONVERSATIONAL FLUENCY THRESHOLD/);
 });
