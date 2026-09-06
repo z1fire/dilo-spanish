@@ -53,7 +53,7 @@ test("builds a repository-path-safe GitHub Pages companion", async () => {
   assert.match(html, /https:\/\/z1fire\.github\.io\/dilo-spanish\//);
   assert.match(manifest, /"start_url": "\.\/#today"/);
   assert.match(manifest, /"scope": "\.\/"/);
-  assert.match(serviceWorker, /dilo-pages-v9/);
+  assert.match(serviceWorker, /dilo-pages-v10/);
   assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(appSource, /https:\/\/dilo-spanish-a1\.z1ifre\.chatgpt\.site/);
 });
@@ -97,7 +97,7 @@ test("ships the complete A1–C2 learning engine", async () => {
   assert.match(engine, /recordReviewMiss/);
   assert.match(engine, /canAdvanceCatchUp/);
   assert.match(coach, /FOUR-LINE MISSION/);
-  assert.match(coach, /Speech recognition checks approximate word similarity, not accent/);
+  assert.match(coach, /Recognition checks words, not accent or rhythm/);
   assert.doesNotMatch(coach, /<input\b/);
   assert.doesNotMatch(coach, /Type what you remember|Write the complete Spanish line/);
   assert.match(coach, /FULL-CARD STUDY/);
@@ -141,6 +141,15 @@ test("ships the complete A1–C2 learning engine", async () => {
   assert.match(coach, /Not yet · reread speaker A and use the surrounding reply/);
   assert.match(coach, /Continue to speaking/);
   assert.doesNotMatch(coach, /What does the learner successfully do\?/);
+  assert.match(coach, /FOUR-LINE ROLE-PLAY · DAY/);
+  assert.match(coach, /REAL-LIFE CHECKPOINT · MISSION/);
+  assert.match(coach, /Choose a conversation line to practice/);
+  assert.match(coach, /All four lines are complete—now perform the exchange once/);
+  assert.match(coach, /missionReady.*allLinesPassed/);
+  assert.match(coach, /Open optional sound gym/);
+  assert.match(coach, /current-level sound and rhythm targets/);
+  assert.match(coach, /recordPronunciation/);
+  assert.doesNotMatch(coach, /className="speaking-lines"|Finish speaking/);
   assert.match(labs, /Twenty listening items and twenty reading\/usage items/);
   assert.match(labs, /move forward and back/);
   assert.match(labs, /EXACT DAY REPLAY/);

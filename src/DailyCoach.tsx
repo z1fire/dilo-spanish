@@ -11,6 +11,7 @@ import {
   getArchive,
   queueCorrection,
   recordPlanPosition,
+  recordPronunciation,
   recordReviewMiss,
   recordSkill,
   recordWordConfidence,
@@ -21,7 +22,7 @@ import {
   type DailyStep,
   type Progress,
 } from "./spanish-engine";
-import { grammarByLevel, lexiconByLevel, missionsByLevel } from "./spanish-curriculum";
+import { grammarByLevel, levelSoundLessons, lexiconByLevel, missionsByLevel } from "./spanish-curriculum";
 import { formatDuration, sentenceTokens, speakSpanish, tokensMatch } from "./spanish-ui";
 
 type Props = {
@@ -339,35 +340,81 @@ type RecognitionConstructor = new () => RecognitionLike;
 function SpeakStep({ progress, update, done }: Props & { done: () => void }) {
   const plan = getArchive(progress).currentPlan!;
   const mission = missionsByLevel[progress.selectedLevel][plan.missionIndex];
-  const lines = [mission.opener, mission.model, mission.followUp, mission.closing];
-  const [passed, setPassed] = useState<number[]>([]);
-  const [listening, setListening] = useState<number | null>(null);
-  const [heard, setHeard] = useState("");
+  const conversation = [
+    { speaker: "PARTNER", learner: false, spanish: mission.opener, support: mission.situation },
+    { speaker: "YOU", learner: true, spanish: mission.model, support: mission.translation },
+    { speaker: "PARTNER", learner: false, spanish: mission.followUp, support: "The partner responds and keeps the exchange moving." },
+    { speaker: "YOU", learner: true, spanish: mission.closing, support: `You complete the goal: ${mission.canDo}.` },
+  ];
+  const soundItems = useMemo(() => levelSoundLessons(progress.selectedLevel).flatMap((lesson) => lesson.examples.map((example) => ({ lesson, example }))), [progress.selectedLevel]);
+  const [lineIndex, setLineIndex] = useState(0);
+  const [passed, setPassed] = useState<boolean[]>([]);
+  const [listening, setListening] = useState(false);
+  const [feedback, setFeedback] = useState("Practice the full exchange: listen, shadow, then record all four lines.");
+  const [score, setScore] = useState<number | null>(null);
   const [manual, setManual] = useState(false);
-  const practice = (index: number) => {
+  const [showSoundGym, setShowSoundGym] = useState(false);
+  const [soundPosition, setSoundPosition] = useState(0);
+  const [soundListening, setSoundListening] = useState(false);
+  const [soundManual, setSoundManual] = useState(false);
+  const [soundScore, setSoundScore] = useState<number | null>(null);
+  const [soundFeedback, setSoundFeedback] = useState("Listen, shadow, then record the target.");
+  const activeTurn = conversation[lineIndex];
+  const activeSound = soundItems[soundPosition];
+  const allLinesPassed = conversation.every((_, index) => passed[index]);
+  const missionReady = DAILY_STEPS.slice(0, 6).every((step) => plan.completedSteps.includes(step));
+  const selectLine = (index: number) => { setLineIndex(index); setScore(null); setManual(false); setFeedback(`${conversation[index].speaker} line ${index + 1} selected. Listen, shadow twice, then record it.`); };
+  const passLine = (message: string) => {
+    const nextPassed = conversation.map((_, index) => passed[index] || index === lineIndex);
+    const nextLine = nextPassed.findIndex((complete) => !complete);
+    setPassed(nextPassed);
+    if (nextLine >= 0) {
+      setLineIndex(nextLine); setScore(null); setManual(false); setFeedback(`${message} Next: line ${nextLine + 1} of 4.`); return;
+    }
+    setFeedback(`${message} All four lines are complete—now perform the exchange once from beginning to end.`);
+  };
+  const practice = () => {
     const Constructor = (window as unknown as { SpeechRecognition?: RecognitionConstructor; webkitSpeechRecognition?: RecognitionConstructor }).SpeechRecognition
       ?? (window as unknown as { webkitSpeechRecognition?: RecognitionConstructor }).webkitSpeechRecognition;
-    if (!Constructor) { setManual(true); return; }
+    if (!Constructor) { setManual(true); setFeedback(`Automatic word checking is unavailable here. Perform line ${lineIndex + 1} aloud, then mark the spoken self-check.`); speakSpanish(activeTurn.spanish, .7); return; }
     const recognition = new Constructor();
     recognition.lang = "es-ES"; recognition.interimResults = false; recognition.continuous = false;
     recognition.onresult = (event) => {
       const transcript = event.results[0]?.[0]?.transcript ?? "";
-      const score = similarityScore(transcript, lines[index]);
-      setHeard(`${transcript} · ${score}% match`);
-      setListening(null);
-      const correct = score >= 65;
+      const nextScore = similarityScore(transcript, activeTurn.spanish);
+      const correct = nextScore >= 65;
+      setScore(nextScore);
       update((current) => recordSkill(current, "speaking", correct));
-      if (correct) setPassed((items) => Array.from(new Set([...items, index])));
+      if (correct) passLine(`Line ${lineIndex + 1} heard: ${transcript} · word match ${nextScore}%.`);
+      else setFeedback(`Line ${lineIndex + 1} heard: ${transcript} · word match ${nextScore}%. Shadow twice and try again.`);
     };
-    recognition.onerror = () => { setListening(null); setManual(true); };
-    recognition.onend = () => setListening(null);
-    setListening(index); setHeard(""); recognition.start();
+    recognition.onerror = () => { setManual(true); setFeedback("I couldn’t check that recording. Try once more, or use the spoken self-check for this line."); };
+    recognition.onend = () => setListening(false);
+    setFeedback(`Listening… perform line ${lineIndex + 1}: ${activeTurn.spanish}`); setScore(null); setManual(false); setListening(true); recognition.start();
   };
-  const manualPass = (index: number) => {
-    setPassed((items) => Array.from(new Set([...items, index])));
+  const manualPass = () => {
+    passLine(`Line ${lineIndex + 1} marked complete after your spoken self-check.`);
     update((current) => recordSkill(current, "speaking", true));
   };
-  return <section className="coach-panel"><StepHeader step="speak" kicker={`FOUR-LINE MISSION · ${mission.title}`} /><div className="speaking-brief"><p>{mission.situation}</p><span>Carry both roles so the whole exchange lives in your voice.</span></div><div className="speaking-lines">{lines.map((line, index) => <article key={line} className={passed.includes(index) ? "passed" : ""}><b>{index % 2 ? "YOUR ROLE" : "OTHER ROLE"}</b><h3>{line}</h3>{progress.showHelp && <p>{index === 1 ? mission.translation : index === 0 ? mission.situation : "Continue the exchange naturally."}</p>}<div><button onClick={() => speakSpanish(line)}>◖)) Model</button><button disabled={listening !== null || passed.includes(index)} onClick={() => practice(index)}>{listening === index ? "Listening…" : passed.includes(index) ? "Passed ✓" : "Speak this line"}</button>{manual && !passed.includes(index) && <button onClick={() => manualPass(index)}>I said it aloud</button>}</div></article>)}</div>{heard && <p className="speech-result">Heard: {heard}</p>}<button className="primary-action coach-next" disabled={passed.length < lines.length} onClick={done}>Finish speaking <span>→</span></button><small className="coach-footnote">Speech recognition checks approximate word similarity, not accent. If the browser cannot listen, the honest manual fallback keeps the lesson accessible.</small></section>;
+  const practiceSound = () => {
+    const Constructor = (window as unknown as { SpeechRecognition?: RecognitionConstructor; webkitSpeechRecognition?: RecognitionConstructor }).SpeechRecognition
+      ?? (window as unknown as { webkitSpeechRecognition?: RecognitionConstructor }).webkitSpeechRecognition;
+    if (!Constructor) { setSoundManual(true); setSoundFeedback("Automatic word checking is unavailable. Say the target aloud, then use the spoken self-check."); speakSpanish(activeSound.example, .68); return; }
+    const recognition = new Constructor();
+    recognition.lang = "es-ES"; recognition.interimResults = false; recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const transcript = event.results[0]?.[0]?.transcript ?? "";
+      const nextScore = similarityScore(transcript, activeSound.example);
+      setSoundScore(nextScore); setSoundFeedback(`${transcript} · word match ${nextScore}%. ${nextScore >= 65 ? "Now self-check the target sound and rhythm." : "Replay slowly and try once more."}`);
+      update((current) => recordPronunciation(current, `${activeSound.lesson.id}:${activeSound.example}`, nextScore >= 65));
+    };
+    recognition.onerror = () => { setSoundManual(true); setSoundFeedback("I couldn’t check that recording. Try again or use the spoken self-check."); };
+    recognition.onend = () => setSoundListening(false);
+    setSoundFeedback(`Listening… say ${activeSound.example}`); setSoundScore(null); setSoundManual(false); setSoundListening(true); recognition.start();
+  };
+  const confirmSound = () => { setSoundScore(100); setSoundFeedback("Spoken self-check complete. Choose another target whenever you’re ready."); update((current) => recordPronunciation(current, `${activeSound.lesson.id}:${activeSound.example}`, true)); };
+  const retrySound = () => { setSoundScore(null); setSoundFeedback("Replay slowly, exaggerate the target once, then repeat naturally."); speakSpanish(activeSound.example, .58); };
+  return <section className="coach-panel"><StepHeader step="speak" kicker={`FOUR-LINE MISSION · ${mission.title}`} /><div className="conversation-stage"><div className="conversation-heading"><span>FOUR-LINE ROLE-PLAY · DAY {plan.phase + 1} / 3</span><h2>{plan.phase === 2 ? "Perform the complete exchange without reading." : "Practice the conversation from both sides."}</h2><p>Tap any turn to hear it. All four logically connected turns are required in today’s speaking checkpoint.</p></div>{conversation.map((turn, index) => <button key={`${turn.speaker}:${index}`} className={turn.learner ? "learner" : "partner"} onClick={() => speakSpanish(turn.spanish, .72)}><span>{turn.speaker} · ◖))</span><strong lang="es">{turn.spanish}</strong>{progress.showHelp && <em>{turn.support}</em>}</button>)}</div><div className="mission-checkpoint"><div className="checkpoint-intro"><span>REAL-LIFE CHECKPOINT · MISSION {plan.missionIndex + 1} · DAY {plan.phase + 1} / 3</span><h2>{plan.phase === 2 ? "Perform the full exchange without reading." : "Prove all four conversation lines."}</h2><p>{mission.situation} Take both roles: listen once, shadow twice, then record every line before performing the exchange from beginning to end.</p><div className="checkpoint-readiness">{DAILY_STEPS.slice(0, 6).map((step) => <span key={step} className={plan.completedSteps.includes(step) ? "ready" : ""}>{plan.completedSteps.includes(step) ? "✓" : "○"} {stepLabels[step].short}</span>)}</div></div><div className="speech-console mission-speech-console"><div className="mission-line-picker" role="tablist" aria-label="Choose a conversation line to practice">{conversation.map((turn, index) => <button key={`${turn.speaker}:line:${index}`} className={`${index === lineIndex ? "active" : ""} ${passed[index] ? "passed" : ""}`} onClick={() => selectLine(index)}><span>{passed[index] ? "✓" : index + 1}</span>{turn.speaker} · LINE {index + 1}</button>)}</div><button className="speaker-orb" onClick={() => speakSpanish(activeTurn.spanish, .7)} aria-label={`Play conversation line ${lineIndex + 1}`}>DI<span>◖)) MODEL {lineIndex + 1}/4</span></button><strong lang="es">{activeTurn.spanish}</strong>{progress.showHelp && <em>{activeTurn.support}</em>}<button className={`record-button ${listening ? "recording" : ""}`} disabled={listening} onClick={practice}><span>●</span>{listening ? "Listening…" : `Perform line ${lineIndex + 1} of 4`}</button>{manual && !passed[lineIndex] && <button className="manual-complete" onClick={manualPass}>I performed this line aloud · mark complete</button>}<div className="speech-feedback">{feedback}</div>{score !== null && <div className="speech-meter"><i style={{ width: `${score}%` }} /></div>}<button className="checkpoint-button" disabled={!missionReady || !allLinesPassed} onClick={done}>{!allLinesPassed ? `${passed.filter(Boolean).length}/4 lines complete` : plan.phase === 2 ? "I performed all four lines · complete mission" : "I performed all four lines · complete today"}</button><small className="speech-honesty">All four lines are required. Recognition checks words, not accent or rhythm; self-check pronunciation and fluency honestly.</small></div><div className="sound-gym-toggle"><button onClick={() => setShowSoundGym((value) => !value)}>{showSoundGym ? "Close sound gym" : "Open optional sound gym"}</button><span>Keep all {soundItems.length} current-level sound and rhythm targets available for extra practice.</span></div>{showSoundGym && <div className="sound-gym"><div className="sound-gym-intro"><span>OPTIONAL SOUND & RHYTHM GYM · {soundPosition + 1} / {soundItems.length}</span><h2>Train the sound, not just the word.</h2><p><strong>{activeSound.lesson.title} · {activeSound.lesson.focus}</strong>{activeSound.lesson.tip}</p></div><div><div className="sound-target-picker">{soundItems.map((item, index) => <button key={`${item.lesson.id}:${item.example}`} className={index === soundPosition ? "active" : ""} onClick={() => { setSoundPosition(index); setSoundScore(null); setSoundManual(false); setSoundFeedback("Listen, shadow, then record the target."); }}>{item.example}</button>)}</div><div className="speech-console sound-speech-console"><button className="speaker-orb" onClick={() => speakSpanish(activeSound.example, .68)} aria-label="Play sound target">R<span>◖)) MODEL</span></button><strong lang="es">{activeSound.example}</strong><em>{activeSound.lesson.focus}</em><button className={`record-button ${soundListening ? "recording" : ""}`} disabled={soundListening} onClick={practiceSound}><span>●</span>{soundListening ? "Listening…" : "Record my target"}</button>{soundManual && <button className="manual-complete" onClick={confirmSound}>I performed this target aloud · mark complete</button>}<div className="speech-feedback">{soundFeedback}</div>{soundScore !== null && <div className="speech-meter"><i style={{ width: `${soundScore}%` }} /></div>}<div className="self-checks"><button onClick={confirmSound}>Sound and rhythm felt accurate</button><button onClick={retrySound}>Needs another round</button></div><small className="speech-honesty">Recognition checks the words, not vowel quality, stress, linking, or regional accent. Use the lesson cue and an honest self-check.</small></div></div></div>}</div></section>;
 }
 
 function CorrectionGate({ progress, update, finish }: Props & { finish: () => void }) {
