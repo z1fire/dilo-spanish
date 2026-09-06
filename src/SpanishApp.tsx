@@ -55,18 +55,23 @@ const PREFERENCES_KEY = "dilo:spanish:preferences:v3";
 const V2_PREFERENCES_KEY = "dilo:spanish:preferences:v2";
 const RECOVERY_KEY = "dilo:spanish:recovery:v3";
 const SYNCED_APP_URL = "https://dilo-spanish-a1.z1ifre.chatgpt.site";
-const APP_VERSION = "3.6.0";
+const APP_VERSION = "3.7.0";
 
 function CorrectionLab({ progress, update, close }: { progress: Progress; update: (recipe: (current: Progress) => Progress) => void; close: () => void }) {
-  const [answer, setAnswer] = useState("");
-  const [item, setItem] = useState(() => dueCorrections(progress)[0] ?? null);
-  if (!item) return <main className="session-shell result-stage"><span>CORRECTIONS CLEAR</span><strong>✓</strong><h1>Nothing due right now.</h1><p>A correction returns on the next learning day after its first successful retrieval.</p><button className="primary-action" onClick={close}>Back to practice <span>→</span></button></main>;
+  const corrections = dueCorrections(progress);
+  const pending = progress.corrections.find((correction) => correction.level === progress.selectedLevel);
+  const item = corrections[0] ?? null;
+  const [result, setResult] = useState("");
+  const [resultExplanation, setResultExplanation] = useState("");
+  if (!item) return <main className="session-shell result-stage"><span>AUTOMATIC CORRECTION LOOP</span><strong>✓</strong><h1>{pending ? "Your next check is scheduled." : "All corrections are clear."}</h1><p>{pending ? "You answered this correctly once. The final check unlocks on the next learning day; there is nothing else you need to do for it today." : "You have completed both retrievals for every correction at this level."}</p><button className="primary-action" onClick={close}>Back to practice <span>→</span></button></main>;
   const choose = (option: string) => {
     const correct = option === item.answer;
-    setAnswer(option);
+    setResult(correct ? item.correctStreak ? "Correct again · this miss is now cleared." : "Correct · this miss will return once tomorrow." : "Not yet · review the explanation and retry.");
+    setResultExplanation(item.explanation);
     update((current) => resolveCorrection(recordSkill(current, item.skill, correct), item.id, correct));
+    if (correct) window.setTimeout(() => setResult(""), 700);
   };
-  return <main className="session-shell correction-session"><header className="session-topbar"><button onClick={close}>×</button><div><span>CORRECTION LOOP</span><strong>{dueCorrections(progress).length + (answer ? 1 : 0)} in this pass</strong></div><small>{item.correctStreak ? "2nd retrieval" : "1st retrieval"}</small></header><section className="quiz-stage"><div className="quiz-prompt"><span>{item.skill}</span><h1>{item.prompt}</h1>{item.speech && <button className="sound-button" onClick={() => speakSpanish(item.speech!)}><b>◖))</b><small>Hear it</small></button>}</div><div className="answer-grid">{item.choices.map((option, index) => <button key={option} disabled={Boolean(answer)} className={answer ? option === item.answer ? "correct" : option === answer ? "wrong" : "muted" : ""} onClick={() => choose(option)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div>{answer && <div className={`answer-ribbon ${answer === item.answer ? "" : "wrong"}`}><div><strong>{answer === item.answer ? (item.correctStreak ? "Correction cleared." : "Correct once. It returns next day.") : `Answer: ${item.answer}`}</strong><span>{item.explanation}</span></div><button onClick={() => { setItem(dueCorrections(progress)[0] ?? null); setAnswer(""); }}>Next →</button></div>}</section></main>;
+  return <main className="session-shell correction-session"><header className="session-topbar"><button onClick={close}>×</button><div><span>AUTOMATIC CORRECTION LOOP</span><strong>{corrections.length} ready now</strong></div><small>{item.correctStreak ? "2nd retrieval" : "1st retrieval"}</small></header><section className="quiz-stage"><div className="quiz-prompt"><span>{item.skill}</span><h1>{item.prompt}</h1>{item.speech && <div className="standalone-correction-audio"><button className="sound-button" onClick={() => speakSpanish(item.speech!)}><b>◖))</b><small>Hear it</small></button><button onClick={() => speakSpanish(item.speech!, .62)}>Play slower</button></div>}</div><div className="answer-grid">{item.choices.map((option, index) => <button key={option} onClick={() => choose(option)}><span>{String.fromCharCode(65 + index)}</span>{option}</button>)}</div>{result && <div className={`answer-ribbon ${result.startsWith("Correct") ? "" : "wrong"}`}><div><strong>{result}</strong><span>{resultExplanation}</span></div></div>}</section></main>;
 }
 
 export default function SpanishApp() {
